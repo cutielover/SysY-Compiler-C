@@ -72,44 +72,42 @@ CompUnit
 // 这种写法会省下很多内存管理的负担
 FuncDef
   : FuncType IDENT '(' ')' Block {
-    auto ast = new FuncDefAST();
-    ast->func_type = unique_ptr<BaseAST>($1);
-    ast->ident = *unique_ptr<string>($2);
-    ast->block = unique_ptr<BaseAST>($5);
-    $$ = ast;
+    auto func_def = new FuncDefAST();
+    func_def->func_type = unique_ptr<BaseAST>($1);
+    func_def->ident = *unique_ptr<string>($2);
+    func_def->block = unique_ptr<BaseAST>($5);
+    $$ = func_def;
   }
   ;
 
 // 同上, 不再解释
 FuncType
   : INT {
-    auto ast = new FuncTypeAST();
-    ast->type = "int";
-    $$ = ast;
+    auto func_type = new FuncTypeAST();
+    func_type->type = "int";
+    $$ = func_type;
   }
   ;
 
 Block
   : '{' Stmt '}' {
-    auto ast = new BlockAST();
-    ast->stmt = unique_ptr<BaseAST>($2);
-    $$ = ast;
+    auto block = new BlockAST();
+    block->stmt = unique_ptr<BaseAST>($2);
+    $$ = block;
   }
   ;
 
 Stmt
   : RETURN Number ';' {
-    auto ast = new StmtAST();
-    ast->number = $2;
-    $$ = ast;
+    auto stmt = new StmtAST();
+    stmt->number = ($2);
+    $$ = stmt;
   }
   ;
 
 Number
   : INT_CONST {
-    // auto ast = new NumberAST();
-    // ast->val = $1;
-    $$ = $1;
+    $$ = ($1);
   }
   ;
 
