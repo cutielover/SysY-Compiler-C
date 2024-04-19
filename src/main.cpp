@@ -3,9 +3,12 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <cstring>
 #include "AST.h"
+#include "riscv.h"
 
 using namespace std;
+string koopa_str;
 
 // 声明 lexer 的输入, 以及 parser 函数
 // 为什么不引用 sysy.tab.hpp 呢? 因为首先里面没有 yyin 的定义
@@ -37,6 +40,9 @@ int main(int argc, const char *argv[])
   // 输出解析得到的 AST, 其实就是个字符串
   // ast->Dump();
   ast->Koopa();
-  cout << endl;
+  if (!strcmp(mode, "-koopa"))
+    cout << koopa_str << endl;
+  else if (!strcmp(mode, "-riscv"))
+    parse_raw_program(koopa_str.c_str());
   return 0;
 }

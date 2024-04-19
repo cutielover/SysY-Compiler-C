@@ -3,6 +3,9 @@
 #include <string>
 #include <vector>
 #include <iostream>
+using namespace std;
+
+extern string koopa_str;
 
 // 所有 AST 的基类
 class BaseAST
@@ -20,13 +23,13 @@ class CompUnitAST : public BaseAST
 {
 public:
     // 用智能指针管理对象
-    std::unique_ptr<BaseAST> func_def;
+    unique_ptr<BaseAST> func_def;
 
     void Dump() const override
     {
-        std::cout << "CompUnitAST { ";
+        cout << "CompUnitAST { ";
         func_def->Dump();
-        std::cout << " }";
+        cout << " }";
     }
 
     void Koopa() const override
@@ -39,23 +42,25 @@ public:
 class FuncDefAST : public BaseAST
 {
 public:
-    std::unique_ptr<BaseAST> func_type;
-    std::string ident;
-    std::unique_ptr<BaseAST> block;
+    unique_ptr<BaseAST> func_type;
+    string ident;
+    unique_ptr<BaseAST> block;
 
     void Dump() const override
     {
-        std::cout << "FuncDefAST { ";
+        cout << "FuncDefAST { ";
         func_type->Dump();
-        std::cout << ", " << ident << ", ";
+        cout << ", " << ident << ", ";
         block->Dump();
-        std::cout << " }";
+        cout << " }";
     }
 
     void Koopa() const override
     {
-        std::cout << "fun ";
-        std::cout << "@" << ident << "(): ";
+        koopa_str += "fun ";
+        koopa_str += "@";
+        koopa_str += ident;
+        koopa_str += "(): ";
         func_type->Koopa();
         block->Koopa();
     }
@@ -65,24 +70,24 @@ public:
 class FuncTypeAST : public BaseAST
 {
 public:
-    std::string type;
+    string type;
 
     void Dump() const override
     {
-        std::cout << "FuncTypeAST { ";
-        std::cout << type;
-        std::cout << " }";
+        cout << "FuncTypeAST { ";
+        cout << type;
+        cout << " }";
     }
 
     void Koopa() const override
     {
         if (type == "int")
         {
-            std::cout << "i32 ";
+            koopa_str += "i32 ";
         }
         else
         {
-            std::cout << "i32 ";
+            koopa_str += "i32 ";
         }
     }
 };
@@ -91,21 +96,21 @@ public:
 class BlockAST : public BaseAST
 {
 public:
-    std::unique_ptr<BaseAST> stmt;
+    unique_ptr<BaseAST> stmt;
 
     void Dump() const override
     {
-        std::cout << "BlockAST { ";
+        cout << "BlockAST { ";
         stmt->Dump();
-        std::cout << " }";
+        cout << " }";
     }
 
     void Koopa() const override
     {
-        std::cout << "{" << "\n";
-        std::cout << "\%entry:" << "\n";
+        koopa_str += "{\n";
+        koopa_str += "\%entry:\n";
         stmt->Koopa();
-        std::cout << "}";
+        koopa_str += "}";
     }
 };
 
@@ -117,16 +122,16 @@ public:
 
     void Dump() const override
     {
-        std::cout << "StmtAST { return ";
-        std::cout << number;
-        std::cout << "; }";
+        cout << "StmtAST { return ";
+        cout << number;
+        cout << "; }";
     }
 
     void Koopa() const override
     {
-        std::cout << "  ret ";
-        std::cout << number;
-        std::cout << "\n";
+        koopa_str += "  ret ";
+        koopa_str += to_string(number);
+        koopa_str += "\n";
     }
 };
 
