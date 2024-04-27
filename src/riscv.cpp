@@ -100,7 +100,7 @@ void Visit(const koopa_raw_value_t &value)
 // false表示未使用临时寄存器 true表示使用
 bool Reg_Select(const koopa_raw_value_t &value)
 {
-    if (reg_num == 7)
+    if (r == "t" && reg_num == 7)
     {
         reg_num = 0;
         r = "a";
