@@ -3,6 +3,12 @@ using namespace std;
 // 函数声明略
 // ...
 
+// 记录一条指令对应的寄存器
+unordered_map<koopa_raw_value_t, string> regs;
+static int reg_num = 0;
+
+static string r = "t";
+
 // 访问 raw program
 void Visit(const koopa_raw_program_t &program)
 {
@@ -51,6 +57,7 @@ void Visit(const koopa_raw_function_t &func)
     cout << "  .globl " << func->name + 1 << "\n";
     cout << func->name + 1 << ":\n";
     // 访问所有基本块
+    // 此时只有一个基本块
     Visit(func->bbs);
 }
 
@@ -78,21 +85,627 @@ void Visit(const koopa_raw_value_t &value)
         // 访问 integer 指令
         Visit(kind.data.integer);
         break;
+    case KOOPA_RVT_BINARY:
+        // 访问 binary 指令
+        Visit(kind.data.binary, value);
+        break;
     default:
         // 其他类型暂时遇不到
         assert(false);
     }
 }
 
+// 为（整数）变量选择合适的寄存器
+// 返回值含义：
+// false表示未使用临时寄存器 true表示使用
+bool Reg_Select(const koopa_raw_value_t &value)
+{
+    if (reg_num == 7)
+    {
+        reg_num = 0;
+        r = "a";
+    }
+
+    // 0直接使用x0寄存器
+    if (value->kind.tag == KOOPA_RVT_INTEGER && value->kind.data.integer.value == 0)
+    {
+        regs[value] = "x0";
+        return false;
+    }
+
+    // 非0，使用li指令加载
+    else if (value->kind.tag == KOOPA_RVT_INTEGER && value->kind.data.integer.value != 0)
+    {
+        // step1: 加载变量到某寄存器
+        cout << "  li " << r << reg_num << ", ";
+        Visit(value->kind.data.integer);
+
+        // step2: 记录使用的寄存器
+        regs[value] = r + to_string(reg_num);
+        reg_num++;
+
+        return true;
+    }
+
+    return false;
+}
+
+void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
+{
+    static string r_0 = r;
+    switch (binary.op)
+    {
+    case KOOPA_RBO_NOT_EQ:
+    {
+        bool reg_l = Reg_Select(binary.lhs);
+        bool reg_r = Reg_Select(binary.rhs);
+
+        // 这一步使用了几个寄存器？
+        int cur = reg_num;
+        if (reg_l && reg_r)
+        {
+            cur -= 2;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+            if (cur == -2)
+            {
+                cur = 5;
+                r_0 = "t";
+            }
+        }
+        else if (!reg_l && !reg_r)
+        {
+            cur = reg_num;
+            reg_num++;
+        }
+        else
+        {
+            cur -= 1;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+        }
+
+        cout << "  xor " << r_0 << cur << ", " << regs[binary.lhs] << ", " << regs[binary.rhs] << "\n";
+        cout << "  snez " << r_0 << cur << ", " << r_0 << cur << "\n";
+
+        regs[value] = r_0 + to_string(cur);
+
+        break;
+    }
+    case KOOPA_RBO_EQ:
+    {
+        bool reg_l = Reg_Select(binary.lhs);
+        bool reg_r = Reg_Select(binary.rhs);
+
+        // 这一步使用了几个寄存器？
+        int cur = reg_num;
+        if (reg_l && reg_r)
+        {
+            cur -= 2;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+            if (cur == -2)
+            {
+                cur = 5;
+                r_0 = "t";
+            }
+        }
+        else if (!reg_l && !reg_r)
+        {
+            cur = reg_num;
+            reg_num++;
+        }
+        else
+        {
+            cur -= 1;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+        }
+        cout << "  xor " << r_0 << cur << ", " << regs[binary.lhs] << ", " << regs[binary.rhs] << "\n";
+        cout << "  seqz " << r_0 << cur << ", " << r_0 << cur << "\n";
+
+        regs[value] = r_0 + to_string(cur);
+
+        break;
+    }
+    case KOOPA_RBO_GT:
+    {
+        bool reg_l = Reg_Select(binary.lhs);
+        bool reg_r = Reg_Select(binary.rhs);
+
+        // 这一步使用了几个寄存器？
+        int cur = reg_num;
+        if (reg_l && reg_r)
+        {
+            cur -= 2;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+            if (cur == -2)
+            {
+                cur = 5;
+                r_0 = "t";
+            }
+        }
+        else if (!reg_l && !reg_r)
+        {
+            cur = reg_num;
+            reg_num++;
+        }
+        else
+        {
+            cur -= 1;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+        }
+
+        cout << "  sgt " << r_0 << cur << ", " << regs[binary.lhs] << ", " << regs[binary.rhs] << "\n";
+
+        regs[value] = r_0 + to_string(cur);
+
+        break;
+    }
+    case KOOPA_RBO_LT:
+    {
+        bool reg_l = Reg_Select(binary.lhs);
+        bool reg_r = Reg_Select(binary.rhs);
+
+        // 这一步使用了几个寄存器？
+        int cur = reg_num;
+        if (reg_l && reg_r)
+        {
+            cur -= 2;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+            if (cur == -2)
+            {
+                cur = 5;
+                r_0 = "t";
+            }
+        }
+        else if (!reg_l && !reg_r)
+        {
+            cur = reg_num;
+            reg_num++;
+        }
+        else
+        {
+            cur -= 1;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+        }
+
+        cout << "  slt " << r_0 << cur << ", " << regs[binary.lhs] << ", " << regs[binary.rhs] << "\n";
+
+        regs[value] = r_0 + to_string(cur);
+
+        break;
+    }
+    case KOOPA_RBO_GE:
+    {
+        bool reg_l = Reg_Select(binary.lhs);
+        bool reg_r = Reg_Select(binary.rhs);
+
+        // 这一步使用了几个寄存器？
+        int cur = reg_num;
+        if (reg_l && reg_r)
+        {
+            cur -= 2;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+            if (cur == -2)
+            {
+                cur = 5;
+                r_0 = "t";
+            }
+        }
+        else if (!reg_l && !reg_r)
+        {
+            cur = reg_num;
+            reg_num++;
+        }
+        else
+        {
+            cur -= 1;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+        }
+
+        cout << "  slt " << r_0 << cur << ", " << regs[binary.lhs] << ", " << regs[binary.rhs] << "\n";
+        cout << "  seqz " << r_0 << cur << ", " << r_0 << cur << "\n";
+
+        regs[value] = r_0 + to_string(cur);
+
+        break;
+    }
+    case KOOPA_RBO_LE:
+    {
+        bool reg_l = Reg_Select(binary.lhs);
+        bool reg_r = Reg_Select(binary.rhs);
+
+        // 这一步使用了几个寄存器？
+        int cur = reg_num;
+        if (reg_l && reg_r)
+        {
+            cur -= 2;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+            if (cur == -2)
+            {
+                cur = 5;
+                r_0 = "t";
+            }
+        }
+        else if (!reg_l && !reg_r)
+        {
+            cur = reg_num;
+            reg_num++;
+        }
+        else
+        {
+            cur -= 1;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+        }
+
+        cout << "  sgt " << r_0 << cur << ", " << regs[binary.lhs] << ", " << regs[binary.rhs] << "\n";
+        cout << "  seqz " << r_0 << cur << ", " << r_0 << cur << "\n";
+
+        regs[value] = r_0 + to_string(cur);
+
+        break;
+    }
+    case KOOPA_RBO_ADD:
+    {
+        bool reg_l = Reg_Select(binary.lhs);
+        bool reg_r = Reg_Select(binary.rhs);
+
+        // 这一步使用了几个寄存器？
+        int cur = reg_num;
+        if (reg_l && reg_r)
+        {
+            cur -= 2;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+            if (cur == -2)
+            {
+                cur = 5;
+                r_0 = "t";
+            }
+        }
+        else if (!reg_l && !reg_r)
+        {
+            cur = reg_num;
+            reg_num++;
+        }
+        else
+        {
+            cur -= 1;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+        }
+
+        cout << "  add " << r_0 << cur << ", " << regs[binary.lhs] << ", " << regs[binary.rhs] << "\n";
+
+        regs[value] = r_0 + to_string(cur);
+
+        break;
+    }
+    case KOOPA_RBO_SUB:
+    {
+        bool reg_l = Reg_Select(binary.lhs);
+        bool reg_r = Reg_Select(binary.rhs);
+
+        // 这一步使用了几个寄存器？
+        int cur = reg_num;
+        if (reg_l && reg_r)
+        {
+            cur -= 2;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+            if (cur == -2)
+            {
+                cur = 5;
+                r_0 = "t";
+            }
+        }
+        else if (!reg_l && !reg_r)
+        {
+            cur = reg_num;
+            reg_num++;
+        }
+        else
+        {
+            cur -= 1;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+        }
+
+        cout << "  sub " << r_0 << cur << ", " << regs[binary.lhs] << ", " << regs[binary.rhs] << "\n";
+
+        regs[value] = r_0 + to_string(cur);
+
+        break;
+    }
+    case KOOPA_RBO_MUL:
+    {
+        bool reg_l = Reg_Select(binary.lhs);
+        bool reg_r = Reg_Select(binary.rhs);
+
+        // 这一步使用了几个寄存器？
+        int cur = reg_num;
+        if (reg_l && reg_r)
+        {
+            cur -= 2;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+            if (cur == -2)
+            {
+                cur = 5;
+                r_0 = "t";
+            }
+        }
+        else if (!reg_l && !reg_r)
+        {
+            cur = reg_num;
+            reg_num++;
+        }
+        else
+        {
+            cur -= 1;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+        }
+
+        cout << "  mul " << r_0 << cur << ", " << regs[binary.lhs] << ", " << regs[binary.rhs] << "\n";
+
+        regs[value] = r_0 + to_string(cur);
+
+        break;
+    }
+    case KOOPA_RBO_DIV:
+    {
+        bool reg_l = Reg_Select(binary.lhs);
+        bool reg_r = Reg_Select(binary.rhs);
+
+        // 这一步使用了几个寄存器？
+        int cur = reg_num;
+        if (reg_l && reg_r)
+        {
+            cur -= 2;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+            if (cur == -2)
+            {
+                cur = 5;
+                r_0 = "t";
+            }
+        }
+        else if (!reg_l && !reg_r)
+        {
+            cur = reg_num;
+            reg_num++;
+        }
+        else
+        {
+            cur -= 1;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+        }
+
+        cout << "  div " << r_0 << cur << ", " << regs[binary.lhs] << ", " << regs[binary.rhs] << "\n";
+
+        regs[value] = r_0 + to_string(cur);
+
+        break;
+    }
+    case KOOPA_RBO_MOD:
+    {
+        bool reg_l = Reg_Select(binary.lhs);
+        bool reg_r = Reg_Select(binary.rhs);
+
+        // 这一步使用了几个寄存器？
+        int cur = reg_num;
+        if (reg_l && reg_r)
+        {
+            cur -= 2;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+            if (cur == -2)
+            {
+                cur = 5;
+                r_0 = "t";
+            }
+        }
+        else if (!reg_l && !reg_r)
+        {
+            cur = reg_num;
+            reg_num++;
+        }
+        else
+        {
+            cur -= 1;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+        }
+
+        cout << "  rem " << r_0 << cur << ", " << regs[binary.lhs] << ", " << regs[binary.rhs] << "\n";
+
+        regs[value] = r_0 + to_string(cur);
+
+        break;
+    }
+    case KOOPA_RBO_AND:
+    {
+        bool reg_l = Reg_Select(binary.lhs);
+        bool reg_r = Reg_Select(binary.rhs);
+
+        // 这一步使用了几个寄存器？
+        int cur = reg_num;
+        if (reg_l && reg_r)
+        {
+            cur -= 2;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+            if (cur == -2)
+            {
+                cur = 5;
+                r_0 = "t";
+            }
+        }
+        else if (!reg_l && !reg_r)
+        {
+            cur = reg_num;
+            reg_num++;
+        }
+        else
+        {
+            cur -= 1;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+        }
+
+        cout << "  and " << r_0 << cur << ", " << regs[binary.lhs] << ", " << regs[binary.rhs] << "\n";
+
+        regs[value] = r_0 + to_string(cur);
+
+        break;
+    }
+    case KOOPA_RBO_OR:
+    {
+        bool reg_l = Reg_Select(binary.lhs);
+        bool reg_r = Reg_Select(binary.rhs);
+
+        // 这一步使用了几个寄存器？
+        int cur = reg_num;
+        if (reg_l && reg_r)
+        {
+            cur -= 2;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+            if (cur == -2)
+            {
+                cur = 5;
+                r_0 = "t";
+            }
+        }
+        else if (!reg_l && !reg_r)
+        {
+            cur = reg_num;
+            reg_num++;
+        }
+        else
+        {
+            cur -= 1;
+            if (cur == -1)
+            {
+                cur = 6;
+                r_0 = "t";
+            }
+        }
+
+        cout << "  or " << r_0 << cur << ", " << regs[binary.lhs] << ", " << regs[binary.rhs] << "\n";
+
+        regs[value] = r_0 + to_string(cur);
+
+        break;
+    }
+    }
+}
+
 void Visit(const koopa_raw_return_t &ret)
 {
-    Visit(ret.value->kind.data.integer);
-    cout << "  ret" << "\n";
+    if (ret.value->kind.tag == KOOPA_RVT_INTEGER)
+    {
+        cout << "  li a0, ";
+        Visit(ret.value->kind.data.integer);
+    }
+    else
+    {
+        string ret_reg = regs[ret.value];
+        cout << "  mv a0, " << ret_reg << "\n";
+    }
+
+    cout << "  ret\n";
 }
 
 void Visit(const koopa_raw_integer_t &integer)
 {
-    cout << "li a0, " << integer.value << "\n";
+    cout << integer.value << "\n";
 }
 // 访问对应类型指令的函数定义略
 // 视需求自行实现

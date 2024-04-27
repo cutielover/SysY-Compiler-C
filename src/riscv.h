@@ -2,6 +2,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include "koopa.h"
 #include "assert.h"
 
@@ -12,4 +13,5 @@ void Visit(const koopa_raw_basic_block_t &bb);
 void Visit(const koopa_raw_value_t &value);
 void Visit(const koopa_raw_return_t &ret);
 void Visit(const koopa_raw_integer_t &integer);
+void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value);
 void parse_raw_program(const char *str);
