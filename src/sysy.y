@@ -10,6 +10,7 @@
 #include <memory>
 #include <string>
 #include <cstring>
+#include <vector>
 #include "AST.h"
 
 // 声明 lexer 函数和错误处理函数
@@ -39,12 +40,14 @@ using namespace std;
 
 // lexer 返回的所有 token 种类的声明
 // 注意 IDENT 和 INT_CONST 会返回 token 的值, 分别对应 str_val 和 int_val
-%token INT RETURN LE GE EQ NE AND OR
+%token INT RETURN CONST LE GE EQ NE AND OR
 %token <str_val> IDENT
 %token <int_val> INT_CONST
 
 // 非终结符的类型定义
-%type <ast_val> FuncDef FuncType Block Stmt Exp PrimaryExp UnaryExp AddExp MulExp LOrExp LAndExp EqExp RelExp
+%type <ast_val> FuncDef FuncType Block Stmt 
+%type <ast_val> Exp PrimaryExp UnaryExp AddExp MulExp LOrExp LAndExp EqExp RelExp
+%type <ast_val> Decl ConstDecl BType ConstDef ConstDefList ConstInitVal BlockItem LVal ConstExp LeVal BlockItemList VarDecl VarDef InitVar VarDefList
 %type <int_val> Number
 
 %%
@@ -92,17 +95,55 @@ FuncType
   ;
 
 Block
-  : '{' Stmt '}' {
+  : '{' BlockItemList '}' {
+    $$ = $2;
+  }
+  ;
+
+BlockItemList
+  : {
     auto ast = new BlockAST();
-    ast->stmt = unique_ptr<BaseAST>($2);
+    $$ = ast;
+  }
+  | BlockItem BlockItemList {
+    auto ast = new BlockAST();
+    auto ast_item_list = (BlockAST*)$2;
+    ast->blockItemList.emplace_back($1);
+    int n = ast_item_list->blockItemList.size();
+    for(int i=0; i < n; i++) {
+      ast->blockItemList.emplace_back(ast_item_list->blockItemList[i].release());
+    }
+    $$ = ast;
+  }
+  ;
+
+BlockItem
+  : Decl {
+    auto ast = new BlockItemAST();
+    ast->decl = unique_ptr<BaseAST>($1);
+    ast->rule = 0;
+    $$ = ast;
+  }
+  | Stmt {
+    auto ast = new BlockItemAST();
+    ast->stmt = unique_ptr<BaseAST>($1);
+    ast->rule = 1;
     $$ = ast;
   }
   ;
 
 Stmt
-  : RETURN Exp ';' {
+  : LeVal '=' Exp ';'{
+    auto ast = new StmtAST();
+    ast->leval = unique_ptr<BaseAST>($1);
+    ast->exp = unique_ptr<BaseAST>($3);
+    ast->rule = 0;
+    $$ = ast;
+  }
+  | RETURN Exp ';' {
     auto ast = new StmtAST();
     ast->exp = unique_ptr<BaseAST>($2);
+    ast->rule = 1;
     $$ = ast;
   }
   ;
@@ -134,6 +175,14 @@ PrimaryExp
     ast ->number = ($1);
     $$ = ast;
   }
+  | LVal {
+    auto ast = new PrimaryExpAST();
+    ast->rule = 2;
+    ast->lval = unique_ptr<BaseAST>($1);
+    $$ = ast;
+  }
+  ;
+
 
 UnaryExp
   : PrimaryExp {
@@ -163,6 +212,7 @@ UnaryExp
     ast -> unaryexp = unique_ptr<BaseAST>($2);
     $$ = ast;
   }
+  ;
 
 MulExp
   : UnaryExp {
@@ -195,6 +245,7 @@ MulExp
     ast -> unaryexp = unique_ptr<BaseAST>($3);
     $$ = ast;
   }
+  ;
 
 AddExp
   : MulExp {
@@ -219,6 +270,7 @@ AddExp
     ast -> mulexp = unique_ptr<BaseAST>($3);
     $$ = ast;
   }
+  ;
 
 RelExp
   : AddExp {
@@ -259,6 +311,7 @@ RelExp
     ast -> addexp = unique_ptr<BaseAST>($3);
     $$ = ast;
   }
+  ;
 
 EqExp
   : RelExp {
@@ -283,6 +336,7 @@ EqExp
     ast -> relexp = unique_ptr<BaseAST>($3);
     $$ = ast;   
   }
+  ;
 
 LAndExp
   : EqExp {
@@ -298,7 +352,7 @@ LAndExp
     ast -> eqexp = unique_ptr<BaseAST>($3);
     $$ = ast; 
   }
-
+  ;
 
 LOrExp
   : LAndExp {
@@ -314,8 +368,141 @@ LOrExp
     ast -> landexp = unique_ptr<BaseAST>($3);
     $$ = ast; 
   }
+  ;
 
+Decl
+  : ConstDecl {
+    auto ast = new DeclAST();
+    ast->rule = 0;
+    ast->constdecl = unique_ptr<BaseAST>($1);
+    $$ = ast;
+  }
+  | VarDecl{
+      auto ast = new DeclAST();
+      ast->rule = 1;
+      ast->vardecl = unique_ptr<BaseAST>($1);
+      $$ = ast;
+  }
+  ;
 
+ConstDecl
+  : CONST BType ConstDefList ';' {
+    auto ast = $3;
+    $$ = ast;
+  }
+  ;
+
+ConstDefList
+  : ConstDef ',' ConstDefList {
+    auto ast = new ConstDeclAST();
+    auto ast_def = (ConstDeclAST* )$3;
+    ast->constDefList.emplace_back($1); 
+    int n = ast_def->constDefList.size();
+    for(int i = 0; i < n; i++) {
+      ast->constDefList.emplace_back(ast_def->constDefList[i].release());
+    }
+    $$ = ast;
+  }
+  | ConstDef {
+    auto ast = new ConstDeclAST();
+    ast->constDefList.emplace_back($1);
+    $$ = ast;
+  }
+  ;
+
+ConstDef
+  : IDENT '=' ConstInitVal {
+    auto ast = new ConstDefAST();
+    ast->ident = *unique_ptr<string>($1);
+    ast->constinitval = unique_ptr<BaseAST>($3);
+    $$ = ast;
+  }
+  ;
+
+ConstInitVal
+  :ConstExp {
+    auto ast = new ConstInitValAST();
+    ast->constexp = unique_ptr<BaseAST>($1);
+    $$ = ast;
+  }
+  ;
+
+ConstExp
+  : Exp {
+    auto ast = new ConstExpAST();
+    ast->exp = unique_ptr<BaseAST>($1);
+    $$ = ast;
+  }
+  ;
+
+BType
+  : INT {
+  }
+  ;
+
+LVal 
+  : IDENT {
+    auto ast = new LValAST();
+    ast->ident = *unique_ptr<string>($1);
+    $$ = ast;
+  }
+  ;
+
+LeVal
+  : IDENT{
+    auto ast = new LeValAST();
+    ast->ident = *unique_ptr<string>($1);
+    $$ = ast;
+  }
+  ;
+
+VarDecl
+  : BType VarDefList ';' {
+    $$ = $2;
+  }
+  ;
+
+VarDefList
+  : VarDef ',' VarDefList {
+    auto ast = new VarDeclAST();
+    auto ast_def = (VarDeclAST* )$3;
+    ast->varDefList.emplace_back($1); 
+    int n = ast_def->varDefList.size();
+    for(int i = 0; i < n; i++) {
+      ast->varDefList.emplace_back(ast_def->varDefList[i].release());
+    }
+    $$ = ast;
+  }
+  | VarDef {
+    auto ast = new VarDeclAST();
+    ast->varDefList.emplace_back($1);
+    $$ = ast;
+  }
+  ;
+
+VarDef
+  : IDENT {
+    auto ast = new VarDefAST();
+    ast->rule = 0;
+    ast->ident = *unique_ptr<string>($1);
+    $$ = ast;
+  }
+  | IDENT '=' InitVar {
+    auto ast = new VarDefAST();
+    ast->rule = 1;
+    ast->ident = *unique_ptr<string>($1);
+    ast->initval = unique_ptr<BaseAST>($3);
+    $$ = ast;
+  }
+  ;
+
+InitVar
+  : Exp {
+    auto ast = new InitValAST();
+    ast->exp = unique_ptr<BaseAST>($1);
+    $$ = ast;
+  }
+  ;
 %%
 
 // 定义错误处理函数, 其中第二个参数是错误信息

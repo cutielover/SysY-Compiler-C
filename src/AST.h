@@ -4,10 +4,12 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include "symbol.h"
 using namespace std;
 
 extern string koopa_str;
 extern int reg_cnt;
+static bool re = false;
 
 // 所有 AST 的基类
 class BaseAST
@@ -18,6 +20,8 @@ public:
     virtual void Dump() const = 0;
 
     virtual void Koopa() const = 0;
+
+    virtual int cal_value() const { return 0; }
 };
 
 // CompUnit 是 BaseAST
@@ -94,16 +98,20 @@ public:
     }
 };
 
-// Block
+// Block lv4
 class BlockAST : public BaseAST
 {
 public:
-    unique_ptr<BaseAST> stmt;
+    vector<unique_ptr<BaseAST>> blockItemList;
 
     void Dump() const override
     {
         cout << "BlockAST { ";
-        stmt->Dump();
+        for (auto &i : blockItemList)
+        {
+            i->Dump();
+            cout << ",";
+        }
         cout << " }";
     }
 
@@ -111,35 +119,62 @@ public:
     {
         koopa_str += "{\n";
         koopa_str += "\%entry:\n";
-        stmt->Koopa();
+        for (auto &i : blockItemList)
+        {
+            i->Koopa();
+        }
         koopa_str += "}";
     }
 };
 
-// Stmt
+// Stmt 语句 赋值|返回 LeVal "=" Exp ";" | "return" Exp ";" lv4
 class StmtAST : public BaseAST
 {
 public:
+    int rule;
     unique_ptr<BaseAST> exp;
+    unique_ptr<BaseAST> leval;
 
     void Dump() const override
     {
-        cout << "StmtAST { return ";
-        exp->Dump();
+        cout << "StmtAST { ";
+        if (rule == 0)
+        {
+            leval->Dump();
+            exp->Dump();
+        }
+        else
+        {
+            cout << "return ";
+            exp->Dump();
+        }
         cout << "; }";
     }
 
     void Koopa() const override
     {
-        exp->Koopa();
-        koopa_str += "  ret ";
-        koopa_str += "%";
-        koopa_str += to_string(reg_cnt - 1);
-        koopa_str += "\n";
+        if (rule == 0)
+        {
+            if (re)
+                return;
+            exp->Koopa();
+            leval->Koopa();
+        }
+        else
+        {
+            if (re)
+                return;
+            exp->Koopa();
+            koopa_str += "  ret ";
+            koopa_str += "%";
+            koopa_str += to_string(reg_cnt - 1);
+            koopa_str += "\n";
+            re = true;
+        }
     }
 };
 
-// Exp 表达式
+// Exp 表达式 lv3
 class ExpAST : public BaseAST
 {
 public:
@@ -154,15 +189,17 @@ public:
     {
         lorexp->Koopa();
     }
+    int cal_value() const override { return lorexp->cal_value(); }
 };
 
-// PrimaryExp 基本表达式，(Exp) | Number
+// PrimaryExp 基本表达式，(Exp) | Number | LVal lv4
 class PrimaryExpAST : public BaseAST
 {
 public:
     int rule;
     int number;
     unique_ptr<BaseAST> exp;
+    unique_ptr<BaseAST> lval;
     void Dump() const override
     {
         cout << "PrimaryExp { ";
@@ -170,9 +207,13 @@ public:
         {
             exp->Dump();
         }
-        else
+        else if (rule == 1)
         {
             cout << number;
+        }
+        else
+        {
+            lval->Dump();
         }
         cout << " }";
     }
@@ -182,7 +223,7 @@ public:
         {
             exp->Koopa();
         }
-        else
+        else if (rule == 1)
         {
             koopa_str += "%";
             koopa_str += to_string(reg_cnt);
@@ -191,10 +232,27 @@ public:
             koopa_str += "\n";
             reg_cnt++;
         }
+        else
+        {
+            lval->Koopa();
+        }
+    }
+    int cal_value() const override
+    {
+        if (rule == 0)
+        {
+            return exp->cal_value();
+        }
+        else if (rule == 1)
+        {
+            return number;
+        }
+        // error case
+        return lval->cal_value();
     }
 };
 
-// UnaryExp 一元表达式，PrimaryExp | UnaryOp UnaryExp
+// UnaryExp 一元表达式，PrimaryExp | UnaryOp[!-+] UnaryExp lv3
 class UnaryExpAST : public BaseAST
 {
 public:
@@ -245,9 +303,31 @@ public:
             }
         }
     }
+    int cal_value() const override
+    {
+        if (rule == 0)
+        {
+            return primaryexp->cal_value();
+        }
+        else
+        {
+            if (op == "!")
+            {
+                return !unaryexp->cal_value();
+            }
+            else if (op == "-")
+            {
+                return -unaryexp->cal_value();
+            }
+            else
+            {
+                return unaryexp->cal_value();
+            }
+        }
+    }
 };
 
-// MulExp 乘法表达式 UnaryExp|MulExp [*/%] UnaryExp
+// MulExp 乘法表达式 UnaryExp | MulExp [*/%] UnaryExp lv3
 class MulExpAST : public BaseAST
 {
 public:
@@ -317,9 +397,29 @@ public:
             }
         }
     }
+    int cal_value() const override
+    {
+        if (rule == 0)
+            return unaryexp->cal_value();
+        else
+        {
+            if (op == "*")
+            {
+                return mulexp->cal_value() * unaryexp->cal_value();
+            }
+            else if (op == "/")
+            {
+                return mulexp->cal_value() / unaryexp->cal_value();
+            }
+            else
+            {
+                return mulexp->cal_value() % unaryexp->cal_value();
+            }
+        }
+    }
 };
 
-// AddExp
+// AddExp MulExp | AddExp [+-] MulExp lv3
 class AddExpAST : public BaseAST
 {
 public:
@@ -378,9 +478,27 @@ public:
             }
         }
     }
+    int cal_value() const override
+    {
+        if (rule == 0)
+        {
+            return mulexp->cal_value();
+        }
+        else
+        {
+            if (op == "+")
+            {
+                return addexp->cal_value() + mulexp->cal_value();
+            }
+            else
+            {
+                return addexp->cal_value() - mulexp->cal_value();
+            }
+        }
+    }
 };
 
-// RelExp
+// RelExp AddExp | RelExp [<>LEGE] AddExp lv3
 class RelExpAST : public BaseAST
 {
 public:
@@ -461,9 +579,35 @@ public:
             }
         }
     }
+    int cal_value() const override
+    {
+        if (rule == 0)
+        {
+            return addexp->cal_value();
+        }
+        else
+        {
+            if (op == "<")
+            {
+                return relexp->cal_value() < addexp->cal_value();
+            }
+            else if (op == ">")
+            {
+                return relexp->cal_value() > addexp->cal_value();
+            }
+            else if (op == "<=")
+            {
+                return relexp->cal_value() <= addexp->cal_value();
+            }
+            else
+            {
+                return relexp->cal_value() >= addexp->cal_value();
+            }
+        }
+    }
 };
 
-// EqExp
+// EqExp RelExp | EqExp EQ/NE RelExp lv3
 class EqExpAST : public BaseAST
 {
 public:
@@ -523,9 +667,25 @@ public:
             }
         }
     }
+    int cal_value() const override
+    {
+        if (rule == 0)
+            return relexp->cal_value();
+        else
+        {
+            if (op == "==")
+            {
+                return eqexp->cal_value() == relexp->cal_value();
+            }
+            else
+            {
+                return eqexp->cal_value() != relexp->cal_value();
+            }
+        }
+    }
 };
 
-// LAndExp
+// LAndExp EqExp | LAndExp AND EqExp lv3
 class LAndExpAST : public BaseAST
 {
 public:
@@ -593,9 +753,18 @@ public:
             reg_cnt++;
         }
     }
+    int cal_value() const override
+    {
+        if (rule == 0)
+            return eqexp->cal_value();
+        else
+        {
+            return landexp->cal_value() && eqexp->cal_value();
+        }
+    }
 };
 
-// LOrExp
+// LOrExp LAndExp | LOrExp OR LAndExp lv3
 class LOrExpAST : public BaseAST
 {
 public:
@@ -654,6 +823,292 @@ public:
             koopa_str += "\n";
             reg_cnt++;
         }
+    }
+    int cal_value() const override
+    {
+        if (rule == 0)
+            return landexp->cal_value();
+        else
+            return lorexp->cal_value() || landexp->cal_value();
+    }
+};
+// Decl 声明：常量/变量 ConstDecl | VarDecl lv4
+class DeclAST : public BaseAST
+{
+public:
+    int rule;
+    unique_ptr<BaseAST> constdecl;
+    unique_ptr<BaseAST> vardecl;
+    void Dump() const override
+    {
+        cout << "Decl { ";
+        if (rule == 0)
+        {
+            constdecl->Dump();
+        }
+        else
+        {
+            vardecl->Dump();
+        }
+        cout << " }";
+    }
+    void Koopa() const override
+    {
+        if (rule == 0)
+        {
+            constdecl->Koopa();
+        }
+        else
+        {
+            vardecl->Koopa();
+        }
+    }
+};
+
+// ConstDecl 声明常量，需要列表 CONST BType ConstDef {"," ConstDef} ";"; lv4
+// 示例 const int a = 3,b = 5;
+class ConstDeclAST : public BaseAST
+{
+public:
+    vector<unique_ptr<BaseAST>> constDefList;
+    void Dump() const override
+    {
+        cout << "ConstDecl { ";
+        for (auto &i : constDefList)
+        {
+            i->Dump();
+            cout << ",";
+        }
+        cout << " }";
+    }
+    void Koopa() const override
+    {
+        for (auto &i : constDefList)
+        {
+            i->Koopa();
+        }
+    }
+};
+
+// Btype 目前只有“INT”一种类型，暂略 lv4
+class BtypeAST : public BaseAST
+{
+public:
+    void Dump() const override {}
+    void Koopa() const override {}
+};
+
+// ConstDef 常量定义 IDENT "=" ConstInitVal lv4
+// 示例 a = 3+5
+class ConstDefAST : public BaseAST
+{
+public:
+    string ident;
+    unique_ptr<BaseAST> constinitval;
+    void Dump() const override
+    {
+        cout << "ConstDef { ";
+        cout << ident << " = ";
+        constinitval->Dump();
+        cout << " }";
+    }
+    void Koopa() const override
+    {
+        var_type[ident] = CONSTANT;
+        var_val[ident] = constinitval->cal_value();
+    }
+};
+
+// ConstInitVal 常量赋值 ConstExp lv4
+class ConstInitValAST : public BaseAST
+{
+public:
+    unique_ptr<BaseAST> constexp;
+    void Dump() const override
+    {
+        cout << "ConstInitVal { ";
+        constexp->Dump();
+        cout << " }";
+    }
+    void Koopa() const override {}
+    int cal_value() const override
+    {
+        return constexp->cal_value();
+    }
+};
+
+// ConstExp 常量赋值表达式 Exp lv4
+class ConstExpAST : public BaseAST
+{
+public:
+    unique_ptr<BaseAST> exp;
+    void Dump() const override
+    {
+        cout << "ConstExp { ";
+        exp->Dump();
+        cout << " }";
+    }
+    void Koopa() const override {}
+    int cal_value() const override
+    {
+        return exp->cal_value();
+    }
+};
+
+// BlockItem Decl | Stmt lv4
+class BlockItemAST : public BaseAST
+{
+public:
+    int rule;
+    unique_ptr<BaseAST> decl;
+    unique_ptr<BaseAST> stmt;
+    void Dump() const override
+    {
+        cout << "BlockItem { ";
+        if (rule == 0)
+            decl->Dump();
+        else
+            stmt->Dump();
+        cout << " }";
+    }
+    void Koopa() const override
+    {
+        if (re)
+            return;
+        if (rule == 0)
+            decl->Koopa();
+        else
+            stmt->Koopa();
+    }
+};
+
+// Lval （右值）变量名 IDENT lv4
+class LValAST : public BaseAST
+{
+public:
+    string ident;
+    void Dump() const override
+    {
+        cout << "LVal { ";
+        cout << ident;
+        cout << " }";
+    }
+    void Koopa() const override
+    {
+        // 常量
+        if (var_type[ident] == CONSTANT)
+        {
+            koopa_str += "%" + to_string(reg_cnt) + " = add 0 ," + to_string(var_val[ident]) + "\n";
+            reg_cnt++;
+        }
+        // 变量
+        else
+        {
+            koopa_str += "%" + to_string(reg_cnt) + " = load @" + ident + "\n";
+            reg_cnt++;
+        }
+    }
+    int cal_value() const override
+    {
+        return var_val[ident];
+    }
+};
+
+// Leval 左值变量 IDENT lv4
+class LeValAST : public BaseAST
+{
+public:
+    string ident;
+    void Dump() const override
+    {
+        cout << "LeVal { ";
+        cout << ident;
+        cout << " }";
+    };
+    void Koopa() const override
+    {
+        koopa_str += "store %" + to_string(reg_cnt - 1) + ", @" + ident + "\n";
+    };
+};
+
+// VarDecl 声明变量，需要列表 BType VarDef {"," VarDef} ";" lv4
+class VarDeclAST : public BaseAST
+{
+public:
+    vector<unique_ptr<BaseAST>> varDefList;
+    void Dump() const override
+    {
+        cout << "VarDecl { ";
+        for (auto &i : varDefList)
+        {
+            i->Dump();
+            cout << ",";
+        }
+        cout << " }";
+    }
+    void Koopa() const override
+    {
+        for (auto &i : varDefList)
+        {
+            i->Koopa();
+        }
+    }
+};
+
+// VarDef 变量定义 IDENT | IDENT "=" InitVal lv4
+class VarDefAST : public BaseAST
+{
+public:
+    int rule;
+    string ident;
+    unique_ptr<BaseAST> initval;
+    void Dump() const override
+    {
+        cout << "VarDef { ";
+        cout << ident;
+        if (rule == 1)
+        {
+            cout << " = ";
+            initval->Dump();
+        }
+        cout << " }";
+    }
+    void Koopa() const override
+    {
+        if (rule == 0)
+        {
+            var_type[ident] = VAR;
+            koopa_str += "@" + ident + " = alloc i32 " + "\n";
+        }
+        else
+        {
+            var_type[ident] = VAR;
+            var_val[ident] = initval->cal_value();
+            koopa_str += "@" + ident + " = alloc i32 " + "\n";
+            initval->Koopa();
+            koopa_str += "store %" + to_string(reg_cnt - 1) + ", @" + ident + "\n";
+        }
+    }
+};
+
+// InitVal 变量赋值 Exp
+class InitValAST : public BaseAST
+{
+public:
+    unique_ptr<BaseAST> exp;
+    void Dump() const override
+    {
+        cout << "InitVal { ";
+        exp->Dump();
+        cout << " }";
+    }
+    void Koopa() const override
+    {
+        exp->Koopa();
+    }
+    int cal_value() const override
+    {
+        return exp->cal_value();
     }
 };
 
