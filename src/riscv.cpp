@@ -8,6 +8,7 @@ unordered_map<koopa_raw_value_t, string> regs;
 static int reg_num = 0;
 
 static string r = "t";
+static string rn = "a";
 
 // 访问 raw program
 void Visit(const koopa_raw_program_t &program)
@@ -104,6 +105,13 @@ bool Reg_Select(const koopa_raw_value_t &value)
     {
         reg_num = 0;
         r = "a";
+        rn = "t";
+    }
+    else if (r == "a" && reg_num == 7)
+    {
+        reg_num = 0;
+        r = "t";
+        rn = "a";
     }
 
     // 0直接使用x0寄存器
@@ -148,12 +156,12 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
             if (cur == -2)
             {
                 cur = 5;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
         else if (!reg_l && !reg_r)
@@ -167,7 +175,7 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
 
@@ -191,12 +199,12 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
             if (cur == -2)
             {
                 cur = 5;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
         else if (!reg_l && !reg_r)
@@ -210,7 +218,7 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
         cout << "  xor " << r_0 << cur << ", " << regs[binary.lhs] << ", " << regs[binary.rhs] << "\n";
@@ -233,12 +241,12 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
             if (cur == -2)
             {
                 cur = 5;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
         else if (!reg_l && !reg_r)
@@ -252,7 +260,7 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
 
@@ -275,12 +283,12 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
             if (cur == -2)
             {
                 cur = 5;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
         else if (!reg_l && !reg_r)
@@ -294,7 +302,7 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
 
@@ -317,12 +325,12 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
             if (cur == -2)
             {
                 cur = 5;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
         else if (!reg_l && !reg_r)
@@ -336,7 +344,7 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
 
@@ -360,12 +368,12 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
             if (cur == -2)
             {
                 cur = 5;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
         else if (!reg_l && !reg_r)
@@ -379,7 +387,7 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
 
@@ -403,12 +411,12 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
             if (cur == -2)
             {
                 cur = 5;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
         else if (!reg_l && !reg_r)
@@ -422,7 +430,7 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
 
@@ -445,12 +453,12 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
             if (cur == -2)
             {
                 cur = 5;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
         else if (!reg_l && !reg_r)
@@ -464,7 +472,7 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
 
@@ -487,12 +495,12 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
             if (cur == -2)
             {
                 cur = 5;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
         else if (!reg_l && !reg_r)
@@ -506,7 +514,7 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
 
@@ -529,12 +537,12 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
             if (cur == -2)
             {
                 cur = 5;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
         else if (!reg_l && !reg_r)
@@ -548,7 +556,7 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
 
@@ -571,12 +579,12 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
             if (cur == -2)
             {
                 cur = 5;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
         else if (!reg_l && !reg_r)
@@ -590,7 +598,7 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
 
@@ -613,12 +621,12 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
             if (cur == -2)
             {
                 cur = 5;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
         else if (!reg_l && !reg_r)
@@ -632,7 +640,7 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
 
@@ -655,12 +663,12 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
             if (cur == -2)
             {
                 cur = 5;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
         else if (!reg_l && !reg_r)
@@ -674,7 +682,7 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
             if (cur == -1)
             {
                 cur = 6;
-                r_0 = "t";
+                r_0 = rn;
             }
         }
 
