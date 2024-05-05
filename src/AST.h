@@ -155,15 +155,11 @@ public:
     {
         if (rule == 0)
         {
-            if (re)
-                return;
             exp->Koopa();
             leval->Koopa();
         }
         else
         {
-            if (re)
-                return;
             exp->Koopa();
             koopa_str += "  ret ";
             koopa_str += "%";
