@@ -342,6 +342,7 @@ void Visit(const koopa_raw_return_t &ret)
     {
         cout << "  li a0, ";
         Visit(ret.value->kind.data.integer);
+        cout << "\n";
     }
     else
     {
