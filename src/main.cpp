@@ -4,12 +4,17 @@
 #include <memory>
 #include <string>
 #include <cstring>
+#include <unordered_set>
+
 #include "AST.h"
+#include "symbol.h"
 #include "riscv.h"
 
 using namespace std;
 string koopa_str;
 int reg_cnt = 0;
+
+SymbolList symbol_list;
 
 // 声明 lexer 的输入, 以及 parser 函数
 // 为什么不引用 sysy.tab.hpp 呢? 因为首先里面没有 yyin 的定义

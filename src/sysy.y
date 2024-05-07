@@ -146,6 +146,28 @@ Stmt
     ast->rule = 1;
     $$ = ast;
   }
+  | RETURN ';' {
+    auto ast = new StmtAST();
+    ast->rule = 1;
+    $$ = ast;
+  }
+  | Exp ';' {
+    auto ast = new StmtAST();
+    ast->exp = unique_ptr<BaseAST>($1);
+    ast->rule = 2;
+    $$ = ast;
+  }
+  | ';' {
+    auto ast = new StmtAST();
+    ast->rule = 2;
+    $$ = ast;
+  }
+  | Block {
+    auto ast = new StmtAST();
+    ast->block = unique_ptr<BaseAST>($1);
+    ast->rule = 3;
+    $$ = ast;
+  }
   ;
 
 Number

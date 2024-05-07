@@ -11,6 +11,8 @@ extern string koopa_str;
 extern int reg_cnt;
 static bool re = false;
 
+extern SymbolList symbol_list;
+
 // lv4+
 //  所有 AST 的基类
 class BaseAST
@@ -77,8 +79,15 @@ public:
         koopa_str += "@";
         koopa_str += ident;
         koopa_str += "(): ";
+
         func_type->Koopa();
+
+        koopa_str += "{\n";
+        koopa_str += "\%entry:\n";
+
         block->Koopa();
+
+        koopa_str += "}";
         return make_pair(false, -1);
     }
 };
@@ -112,7 +121,7 @@ public:
 };
 
 // lv4+
-//  Block lv4
+// Block lv4
 class BlockAST : public BaseAST
 {
 public:
@@ -131,13 +140,15 @@ public:
 
     pair<bool, int> Koopa() const override
     {
-        koopa_str += "{\n";
-        koopa_str += "\%entry:\n";
+        symbol_list.newMap();
+
         for (auto &i : blockItemList)
         {
             i->Koopa();
         }
-        koopa_str += "}";
+
+        symbol_list.deleteMap();
+
         return make_pair(false, -1);
     }
 };
@@ -160,18 +171,20 @@ public:
     };
     string name() const override
     {
-        return ident;
+        symbol_list.getSymbol(ident);
+        return ident + "_" + to_string(symbol_list.cur_index);
     }
 };
 
 // lv4+
-// Stmt 语句 赋值|返回 LeVal "=" Exp ";" | "return" Exp ";" lv4
+// Stmt 语句 赋值|返回 LeVal "=" Exp ";" | "return" [Exp] ";" | [Exp] ";" | Block
 class StmtAST : public BaseAST
 {
 public:
     int rule;
     unique_ptr<BaseAST> exp;
     unique_ptr<BaseAST> leval;
+    unique_ptr<BaseAST> block;
 
     void Dump() const override
     {
@@ -181,10 +194,20 @@ public:
             leval->Dump();
             exp->Dump();
         }
-        else
+        else if (rule == 1)
         {
             cout << "return ";
             exp->Dump();
+        }
+        else if (rule == 2)
+        {
+            cout << "exp ";
+            exp->Dump();
+        }
+        else if (rule == 3)
+        {
+            cout << "block ";
+            block->Dump();
         }
         cout << "; }";
     }
@@ -203,18 +226,34 @@ public:
                 koopa_str += "store %" + to_string(reg_cnt - 1) + ", @" + leval->name() + "\n";
             }
         }
-        else
+        else if (rule == 1)
         {
-            pair<bool, int> res = exp->Koopa();
-            if (res.first)
+            if (exp != nullptr)
             {
-                koopa_str += "  ret " + to_string(res.second) + "\n";
+                pair<bool, int> res = exp->Koopa();
+                if (res.first)
+                {
+                    koopa_str += "  ret " + to_string(res.second) + "\n";
+                }
+                else
+                {
+                    koopa_str += "  ret %" + to_string(reg_cnt - 1) + "\n";
+                }
             }
             else
-            {
-                koopa_str += "  ret %" + to_string(reg_cnt - 1) + "\n";
+            { //?
+                koopa_str += "  ret\n";
             }
             re = true;
+        }
+        else if (rule == 2)
+        {
+            if (exp != nullptr)
+                exp->Koopa();
+        }
+        else if (rule == 3)
+        {
+            block->Koopa();
         }
         return make_pair(false, -1);
     }
@@ -1024,6 +1063,8 @@ public:
                 // koopa_str += "%" + to_string(reg_cnt) + " = eq %";
                 // koopa_str += to_string(leftreg) + ", 0\n";
                 // reg_cnt++;
+                if (res_l.second == 0)
+                    return make_pair(true, 0);
                 // 右边逻辑取反
                 koopa_str += "%" + to_string(reg_cnt) + " = eq %";
                 koopa_str += to_string(rightreg) + ", 0\n";
@@ -1039,6 +1080,8 @@ public:
             }
             else if (!res_l.first && res_r.first)
             {
+                if (res_r.second == 0)
+                    return make_pair(true, 0);
                 /* 逻辑与 */
                 // 左边逻辑取反
                 koopa_str += "%" + to_string(reg_cnt) + " = eq %";
@@ -1280,9 +1323,13 @@ public:
     }
     pair<bool, int> Koopa() const override
     {
-        var_type[ident] = CONSTANT;
-        // var_val[ident] = constinitval->cal_value();
-        var_val[ident] = (constinitval->Koopa()).second;
+        int val = (constinitval->Koopa()).second;
+        Value tmp(CONSTANT, val);
+        symbol_list.addSymbol(ident, tmp);
+
+        // var_type[ident] = CONSTANT;
+        // // var_val[ident] = constinitval->cal_value();
+        // var_val[ident] = (constinitval->Koopa()).second;
         return make_pair(false, -1);
     }
 };
@@ -1369,23 +1416,20 @@ public:
     }
     pair<bool, int> Koopa() const override
     {
+        Value cur_var = symbol_list.getSymbol(ident);
         // 常量
-        if (var_type[ident] == CONSTANT)
+        if (cur_var.type == CONSTANT)
         {
-            return make_pair(true, var_val[ident]);
+            return make_pair(true, cur_var.val);
         }
         // 变量
         else
         {
-            koopa_str += "%" + to_string(reg_cnt) + " = load @" + ident + "\n";
+            koopa_str += "%" + to_string(reg_cnt) + " = load @" + ident + "_" + to_string(symbol_list.cur_index) + "\n";
             reg_cnt++;
             // !!!
-            return make_pair(false, var_val[ident]);
+            return make_pair(false, -1);
         }
-    }
-    int cal_value() const override
-    {
-        return var_val[ident];
     }
 };
 
@@ -1436,24 +1480,36 @@ public:
     {
         if (rule == 0)
         {
-            var_type[ident] = VAR;
-            koopa_str += "@" + ident + " = alloc i32 " + "\n";
+            // var_type[ident] = VAR;
+            Value tmp(VAR, 0);
+
+            string name = ident + "_" + to_string(symbol_list.index);
+
+            symbol_list.addSymbol(ident, tmp);
+
+            koopa_str += "@" + name + " = alloc i32 " + "\n";
             return make_pair(false, -1);
         }
         else
         {
-            var_type[ident] = VAR;
+            // var_type[ident] = VAR;
             // var_val[ident] = initval->cal_value();
-            var_val[ident] = (initval->Koopa()).second;
-            koopa_str += "@" + ident + " = alloc i32 " + "\n";
+            int val = (initval->Koopa()).second;
+            Value tmp(VAR, val);
+
+            string name = ident + "_" + to_string(symbol_list.index);
+
+            symbol_list.addSymbol(ident, tmp);
+
+            koopa_str += "@" + name + " = alloc i32 " + "\n";
             pair<bool, int> res = initval->Koopa();
             if (res.first)
             {
-                koopa_str += "store " + to_string(res.second) + ", @" + ident + "\n";
+                koopa_str += "store " + to_string(res.second) + ", @" + name + "\n";
             }
             else
             {
-                koopa_str += "store %" + to_string(reg_cnt - 1) + ", @" + ident + "\n";
+                koopa_str += "store %" + to_string(reg_cnt - 1) + ", @" + name + "\n";
             }
             return make_pair(false, -1);
         }
