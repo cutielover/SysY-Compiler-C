@@ -4,17 +4,27 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <unordered_map>
 #include "symbol.h"
 using namespace std;
 
 extern string koopa_str;
 extern int reg_cnt;
+extern int if_cnt;
+
+static int block_cnt;
+static int block_now;
+static int block_last;
+static vector<bool> block_end;
+static unordered_map<int, int> block_parent;
+
 static bool re = false;
+static bool if_end = true;
 
 extern SymbolList symbol_list;
 
 // lv4+
-//  所有 AST 的基类
+// 所有 AST 的基类
 class BaseAST
 {
 public:
@@ -34,7 +44,7 @@ public:
 };
 
 // lv4+
-//  CompUnit 是 BaseAST
+// CompUnit 是 BaseAST
 class CompUnitAST : public BaseAST
 {
 public:
@@ -56,7 +66,7 @@ public:
 };
 
 // lv4+
-//  FuncDef 也是 BaseAST
+// FuncDef 也是 BaseAST
 class FuncDefAST : public BaseAST
 {
 public:
@@ -93,7 +103,7 @@ public:
 };
 
 // lv4+
-//  FuncType
+// FuncType
 class FuncTypeAST : public BaseAST
 {
 public:
@@ -140,12 +150,57 @@ public:
 
     pair<bool, int> Koopa() const override
     {
+        re = false;
         symbol_list.newMap();
+
+        // 块计数：当前块为修改后的block_cnt
+        block_cnt++;
+        block_last = block_now;
+        int parent_block = block_now;
+        // 记录：当前块的父亲为block_last（即上一个执行的块）
+        // 边界：起始block_cnt为1，block_now为0
+        block_now = block_cnt;
+        block_parent[block_now] = parent_block;
+        // 修改：将当前块正式修改为block_cnt
+        // 记录：设置当前块为未完结的
+        block_end.push_back(false);
 
         for (auto &i : blockItemList)
         {
+            if (block_end[block_now])
+            {
+                break;
+            }
             i->Koopa();
         }
+
+        // koopa_str += "\n";
+        // koopa_str += "/////////////Block" + to_string(block_now) + ": block_end = ";
+        // if (block_end[block_now])
+        // {
+        //     koopa_str += "true/////////////\n\n";
+        // }
+        // else
+        // {
+        //     koopa_str += "false////////////\n\n";
+        // }
+
+        // 处理if{}的情况
+        if (parent_block != 0)
+            block_end[parent_block] = block_end[block_now];
+
+        // koopa_str += "/////////////Block" + to_string(parent_block) + ": block_end = ";
+        // if (block_end[parent_block])
+        // {
+        //     koopa_str += "true/////////////\n\n";
+        // }
+        // else
+        // {
+        //     koopa_str += "false////////////\n\n";
+        // }
+
+        // 子块完成后，归位block_last
+        block_now = block_parent[block_now];
 
         symbol_list.deleteMap();
 
@@ -171,13 +226,13 @@ public:
     };
     string name() const override
     {
-        symbol_list.getSymbol(ident);
-        return ident + "_" + to_string(symbol_list.cur_index);
+        Value var = symbol_list.getSymbol(ident);
+        return ident + "_" + to_string(var.name_index);
     }
 };
 
 // lv4+
-// Stmt 语句 赋值|返回 LeVal "=" Exp ";" | "return" [Exp] ";" | [Exp] ";" | Block
+// Stmt 语句 赋值|返回|无效表达式|if语句 LeVal "=" Exp ";" | "return" [Exp] ";" | [Exp] ";" | Block | If [Else]
 class StmtAST : public BaseAST
 {
 public:
@@ -185,6 +240,7 @@ public:
     unique_ptr<BaseAST> exp;
     unique_ptr<BaseAST> leval;
     unique_ptr<BaseAST> block;
+    // unique_ptr<BaseAST> if_stmt;
 
     void Dump() const override
     {
@@ -219,11 +275,11 @@ public:
             pair<bool, int> res = exp->Koopa();
             if (res.first)
             {
-                koopa_str += "store " + to_string(res.second) + ", @" + leval->name() + "\n";
+                koopa_str += "  store " + to_string(res.second) + ", @" + leval->name() + "\n";
             }
             else
             {
-                koopa_str += "store %" + to_string(reg_cnt - 1) + ", @" + leval->name() + "\n";
+                koopa_str += "  store %" + to_string(reg_cnt - 1) + ", @" + leval->name() + "\n";
             }
         }
         else if (rule == 1)
@@ -244,7 +300,9 @@ public:
             { //?
                 koopa_str += "  ret\n";
             }
-            re = true;
+            // koopa_str += "Ret: Block" + to_string(block_now) + "\n";
+            block_end[block_now] = true;
+            // re = true;
         }
         else if (rule == 2)
         {
@@ -255,6 +313,143 @@ public:
         {
             block->Koopa();
         }
+        return make_pair(false, -1);
+    }
+};
+
+// lv6
+// if_stmt ::= If ELSE else_stmt | If
+class IfStmtAST : public BaseAST
+{
+public:
+    unique_ptr<BaseAST> if_stmt;
+    unique_ptr<BaseAST> else_stmt;
+    void Dump() const override
+    {
+        cout << "IfStmtAST { ";
+        if_stmt->Dump();
+        cout << "; }";
+    }
+    pair<bool, int> Koopa() const override
+    {
+        if_cnt++;
+        int now_if_cnt = if_cnt;
+        // If
+        if (else_stmt == nullptr)
+        {
+            // 说明if的结尾是end
+            if_end = true;
+            if_stmt->Koopa();
+            // now_if_cnt = if_cnt;
+            string end_tag = "%end_" + to_string(now_if_cnt);
+            koopa_str += end_tag + ":\n";
+            // if条件语句不能意味着结束
+            block_end[block_now] = false;
+        }
+        // If ELSE Stmt
+        else
+        {
+            if_end = false;
+
+            if_stmt->Koopa();
+            bool if_stmt_end = block_end[block_now];
+
+            // now_if_cnt = if_cnt;
+            string end_tag = "%end_" + to_string(now_if_cnt);
+            string else_tag = "%else_" + to_string(now_if_cnt);
+
+            // else tag:
+            koopa_str += else_tag + ":\n";
+
+            else_stmt->Koopa();
+            bool else_stmt_end = block_end[block_now];
+
+            end_tag = "%end_" + to_string(now_if_cnt);
+
+            if (!block_end[block_now])
+            {
+                // cout << end_tag << " jump at line 358" << endl;
+                koopa_str += "  jump " + end_tag + "\n\n";
+            }
+            if (if_stmt_end && else_stmt_end)
+            {
+                block_end[block_now] = true;
+            }
+            else
+            {
+                block_end[block_now] = false;
+                koopa_str += end_tag + ":\n";
+            }
+            // koopa_str += end_tag + ":\n";
+        }
+        // if_cnt--;
+        return make_pair(false, -1);
+    }
+};
+
+// lv6
+// If ::= IF (Exp) Stmt
+// 不含else的if
+class IfAST : public BaseAST
+{
+public:
+    unique_ptr<BaseAST> exp;
+    unique_ptr<BaseAST> stmt;
+    void Dump() const override
+    {
+        cout << "IfAST { ";
+        cout << "if ( ";
+        exp->Dump();
+        cout << " ) ";
+        stmt->Dump();
+        cout << "; }";
+    }
+    pair<bool, int> Koopa() const override
+    {
+        pair<bool, int> res = exp->Koopa();
+        int now_if_cnt = if_cnt;
+        bool now_if_end = if_end;
+
+        string then_tag = "%then_" + to_string(now_if_cnt);
+        string else_tag = "%else_" + to_string(now_if_cnt);
+        string end_tag = "%end_" + to_string(now_if_cnt);
+        // 是否返回具体值
+        if (res.first)
+        {
+            koopa_str += "  br " + to_string(res.second) + ", " + then_tag;
+        }
+        else
+        {
+            koopa_str += "  br %" + to_string(reg_cnt - 1) + ", " + then_tag;
+        }
+        // 没有else的情况
+        if (now_if_end)
+        {
+            koopa_str += ", " + end_tag + "\n";
+        }
+        // else
+        else
+        {
+            koopa_str += ", " + else_tag + "\n";
+        }
+
+        koopa_str += "\n";
+        koopa_str += then_tag + ":\n";
+
+        stmt->Koopa();
+
+        if (!block_end[block_now])
+        {
+            // koopa_str += "Jump: block_last = " + to_string(block_last) + "\n";
+            // koopa_str += "Jump: block_now = " + to_string(block_now) + "\n";
+            // koopa_str += "Jump: Block" + to_string(block_now) + "\n";
+            // cout << end_tag << " jump at line 435" << endl;
+            koopa_str += "  jump " + end_tag + "\n";
+        }
+        koopa_str += "\n";
+        // end of if branch
+        // koopa_str += end_tag + ":\n";
+
         return make_pair(false, -1);
     }
 };
@@ -335,7 +530,7 @@ public:
 };
 
 // lv4+
-// UnaryExp 一元表达式，PrimaryExp | UnaryOp[!-+] UnaryExp lv3
+// UnaryExp ::= PrimaryExp | UnaryOp[!-+] UnaryExp lv3
 class UnaryExpAST : public BaseAST
 {
 public:
@@ -376,7 +571,7 @@ public:
                     return make_pair(true, 0);
 
                     ////////////////
-                    koopa_str += "%" + to_string(reg_cnt) + " = eq " + to_string(res.second) + ", 0\n";
+                    koopa_str += "  %" + to_string(reg_cnt) + " = eq " + to_string(res.second) + ", 0\n";
                     reg_cnt++;
                 }
                 else if (op == "-")
@@ -384,7 +579,7 @@ public:
                     return make_pair(true, -res.second);
 
                     /////////////////
-                    koopa_str += "%" + to_string(reg_cnt) + " = sub 0, " + to_string(res.second) + "\n";
+                    koopa_str += "  %" + to_string(reg_cnt) + " = sub 0, " + to_string(res.second) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "+")
@@ -396,12 +591,12 @@ public:
             {
                 if (op == "!")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = eq %" + to_string(reg_cnt - 1) + ", 0\n";
+                    koopa_str += "  %" + to_string(reg_cnt) + " = eq %" + to_string(reg_cnt - 1) + ", 0\n";
                     reg_cnt++;
                 }
                 else if (op == "-")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = sub 0, %" + to_string(reg_cnt - 1) + "\n";
+                    koopa_str += "  %" + to_string(reg_cnt) + " = sub 0, %" + to_string(reg_cnt - 1) + "\n";
                     reg_cnt++;
                 }
             }
@@ -433,7 +628,7 @@ public:
 };
 
 // lv4+
-// MulExp 乘法表达式 UnaryExp | MulExp [*/%] UnaryExp lv3
+// MulExp ::= UnaryExp | MulExp [*/%] UnaryExp lv3
 class MulExpAST : public BaseAST
 {
 public:
@@ -475,7 +670,7 @@ public:
                 {
                     return make_pair(true, res_l.second * res_r.second);
                     ///////////////////////////////////////////////////
-                    koopa_str += "%" + to_string(reg_cnt) + " = mul " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = mul " + to_string(res_l.second);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
@@ -483,7 +678,7 @@ public:
                 {
                     return make_pair(true, res_l.second / res_r.second);
                     /////////////////////////////////////////////////////
-                    koopa_str += "%" + to_string(reg_cnt) + " = div " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = div " + to_string(res_l.second);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
@@ -491,7 +686,7 @@ public:
                 {
                     return make_pair(true, res_l.second % res_r.second);
                     //////////////////////////////////////////////////////
-                    koopa_str += "%" + to_string(reg_cnt) + " = mod " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = mod " + to_string(res_l.second);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
@@ -500,19 +695,19 @@ public:
             {
                 if (op == "*")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = mul " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = mul " + to_string(res_l.second);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "/")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = div " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = div " + to_string(res_l.second);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "%")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = mod " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = mod " + to_string(res_l.second);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
@@ -521,19 +716,19 @@ public:
             {
                 if (op == "*")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = mul %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = mul %" + to_string(leftreg);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "/")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = div %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = div %" + to_string(leftreg);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "%")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = mod %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = mod %" + to_string(leftreg);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
@@ -542,19 +737,19 @@ public:
             {
                 if (op == "*")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = mul %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = mul %" + to_string(leftreg);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "/")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = div %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = div %" + to_string(leftreg);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "%")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = mod %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = mod %" + to_string(leftreg);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
@@ -585,7 +780,7 @@ public:
 };
 
 // lv4+
-// AddExp MulExp | AddExp [+-] MulExp lv3
+// AddExp ::= MulExp | AddExp [+-] MulExp lv3
 class AddExpAST : public BaseAST
 {
 public:
@@ -626,14 +821,14 @@ public:
                 if (op == "+")
                 {
                     return make_pair(true, res_l.second + res_r.second);
-                    koopa_str += "%" + to_string(reg_cnt) + " = add " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = add " + to_string(res_l.second);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "-")
                 {
                     return make_pair(true, res_l.second - res_r.second);
-                    koopa_str += "%" + to_string(reg_cnt) + " = sub " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = sub " + to_string(res_l.second);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
@@ -642,13 +837,13 @@ public:
             {
                 if (op == "+")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = add " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = add " + to_string(res_l.second);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "-")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = sub " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = sub " + to_string(res_l.second);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
@@ -657,13 +852,13 @@ public:
             {
                 if (op == "+")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = add %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = add %" + to_string(leftreg);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "-")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = sub %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = sub %" + to_string(leftreg);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
@@ -672,13 +867,13 @@ public:
             {
                 if (op == "+")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = add %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = add %" + to_string(leftreg);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "-")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = sub %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = sub %" + to_string(leftreg);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
@@ -708,7 +903,7 @@ public:
 };
 
 // lv4+
-// RelExp AddExp | RelExp [<>LEGE] AddExp lv3
+// RelExp ::= AddExp | RelExp [<>LEGE] AddExp lv3
 class RelExpAST : public BaseAST
 {
 public:
@@ -750,7 +945,7 @@ public:
                 {
                     return make_pair(true, res_l.second < res_r.second);
                     ///////////////////////////////////////////////////
-                    koopa_str += "%" + to_string(reg_cnt) + " = lt " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = lt " + to_string(res_l.second);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
@@ -758,7 +953,7 @@ public:
                 {
                     return make_pair(true, res_l.second > res_r.second);
                     /////////////////////////////////////////////////////
-                    koopa_str += "%" + to_string(reg_cnt) + " = gt " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = gt " + to_string(res_l.second);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
@@ -766,7 +961,7 @@ public:
                 {
                     return make_pair(true, res_l.second <= res_r.second);
                     //////////////////////////////////////////////////////
-                    koopa_str += "%" + to_string(reg_cnt) + " = le " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = le " + to_string(res_l.second);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
@@ -774,7 +969,7 @@ public:
                 {
                     return make_pair(true, res_l.second >= res_r.second);
                     ///////////////////////////////////////////////////////
-                    koopa_str += "%" + to_string(reg_cnt) + " = ge " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = ge " + to_string(res_l.second);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
@@ -783,25 +978,25 @@ public:
             {
                 if (op == "<")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = lt " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = lt " + to_string(res_l.second);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
                 else if (op == ">")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = gt " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = gt " + to_string(res_l.second);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "<=")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = le " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = le " + to_string(res_l.second);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
                 else if (op == ">=")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = ge " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = ge " + to_string(res_l.second);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
@@ -810,25 +1005,25 @@ public:
             {
                 if (op == "<")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = lt %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = lt %" + to_string(leftreg);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
                 else if (op == ">")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = gt %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = gt %" + to_string(leftreg);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "<=")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = le %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = le %" + to_string(leftreg);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
                 else if (op == ">=")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = ge %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = ge %" + to_string(leftreg);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
@@ -837,25 +1032,25 @@ public:
             {
                 if (op == "<")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = lt %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = lt %" + to_string(leftreg);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
                 else if (op == ">")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = gt %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = gt %" + to_string(leftreg);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "<=")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = le %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = le %" + to_string(leftreg);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
                 else if (op == ">=")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = ge %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = ge %" + to_string(leftreg);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
@@ -892,7 +1087,7 @@ public:
 };
 
 // lv4+
-// EqExp RelExp | EqExp EQ/NE RelExp lv3
+// EqExp ::= RelExp | EqExp EQ/NE RelExp lv3
 class EqExpAST : public BaseAST
 {
 public:
@@ -936,7 +1131,7 @@ public:
                 {
                     return make_pair(true, res_l.second == res_r.second);
                     ////////////////////////////////////////////////////
-                    koopa_str += "%" + to_string(reg_cnt) + " = eq " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = eq " + to_string(res_l.second);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
@@ -944,7 +1139,7 @@ public:
                 {
                     return make_pair(true, res_l.second != res_r.second);
                     /////////////////////////////////////////////////////
-                    koopa_str += "%" + to_string(reg_cnt) + " = ne " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = ne " + to_string(res_l.second);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
@@ -953,13 +1148,13 @@ public:
             {
                 if (op == "==")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = eq " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = eq " + to_string(res_l.second);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "!=")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = ne " + to_string(res_l.second);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = ne " + to_string(res_l.second);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
@@ -968,13 +1163,13 @@ public:
             {
                 if (op == "==")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = eq %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = eq %" + to_string(leftreg);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "!=")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = ne %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = ne %" + to_string(leftreg);
                     koopa_str += ", " + to_string(res_r.second) + "\n";
                     reg_cnt++;
                 }
@@ -983,13 +1178,13 @@ public:
             {
                 if (op == "==")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = eq %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = eq %" + to_string(leftreg);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
                 else if (op == "!=")
                 {
-                    koopa_str += "%" + to_string(reg_cnt) + " = ne %" + to_string(leftreg);
+                    koopa_str += "  %" + to_string(reg_cnt) + " = ne %" + to_string(leftreg);
                     koopa_str += ", %" + to_string(rightreg) + "\n";
                     reg_cnt++;
                 }
@@ -1066,15 +1261,15 @@ public:
                 if (res_l.second == 0)
                     return make_pair(true, 0);
                 // 右边逻辑取反
-                koopa_str += "%" + to_string(reg_cnt) + " = eq %";
+                koopa_str += "  %" + to_string(reg_cnt) + " = eq %";
                 koopa_str += to_string(rightreg) + ", 0\n";
                 reg_cnt++;
                 // 对两边逻辑取反的结果取或
-                koopa_str += "%" + to_string(reg_cnt) + " = or ";
+                koopa_str += "  %" + to_string(reg_cnt) + " = or ";
                 koopa_str += to_string(!res_l.second) + ", %" + to_string(reg_cnt - 1) + "\n";
                 reg_cnt++;
                 // 再取反
-                koopa_str += "%" + to_string(reg_cnt) + " = eq %";
+                koopa_str += "  %" + to_string(reg_cnt) + " = eq %";
                 koopa_str += to_string(reg_cnt - 1) + ", 0\n";
                 reg_cnt++;
             }
@@ -1084,7 +1279,7 @@ public:
                     return make_pair(true, 0);
                 /* 逻辑与 */
                 // 左边逻辑取反
-                koopa_str += "%" + to_string(reg_cnt) + " = eq %";
+                koopa_str += "  %" + to_string(reg_cnt) + " = eq %";
                 koopa_str += to_string(leftreg) + ", 0\n";
                 reg_cnt++;
                 // 右边逻辑取反
@@ -1092,11 +1287,11 @@ public:
                 // koopa_str += to_string(rightreg) + ", 0\n";
                 // reg_cnt++;
                 // 对两边逻辑取反的结果取或
-                koopa_str += "%" + to_string(reg_cnt) + " = or ";
+                koopa_str += "  %" + to_string(reg_cnt) + " = or ";
                 koopa_str += to_string(!res_r.second) + ", %" + to_string(reg_cnt - 1) + "\n";
                 reg_cnt++;
                 // 再取反
-                koopa_str += "%" + to_string(reg_cnt) + " = eq %";
+                koopa_str += "  %" + to_string(reg_cnt) + " = eq %";
                 koopa_str += to_string(reg_cnt - 1) + ", 0\n";
                 reg_cnt++;
             }
@@ -1104,19 +1299,19 @@ public:
             {
                 /* 逻辑与 */
                 // 左边逻辑取反
-                koopa_str += "%" + to_string(reg_cnt) + " = eq %";
+                koopa_str += "  %" + to_string(reg_cnt) + " = eq %";
                 koopa_str += to_string(leftreg) + ", 0\n";
                 reg_cnt++;
                 // 右边逻辑取反
-                koopa_str += "%" + to_string(reg_cnt) + " = eq %";
+                koopa_str += "  %" + to_string(reg_cnt) + " = eq %";
                 koopa_str += to_string(rightreg) + ", 0\n";
                 reg_cnt++;
                 // 对两边逻辑取反的结果取或
-                koopa_str += "%" + to_string(reg_cnt) + " = or %";
+                koopa_str += "  %" + to_string(reg_cnt) + " = or %";
                 koopa_str += to_string(reg_cnt - 2) + ", %" + to_string(reg_cnt - 1) + "\n";
                 reg_cnt++;
                 // 再取反
-                koopa_str += "%" + to_string(reg_cnt) + " = eq %";
+                koopa_str += "  %" + to_string(reg_cnt) + " = eq %";
                 koopa_str += to_string(reg_cnt - 1) + ", 0\n";
                 reg_cnt++;
             }
@@ -1186,11 +1381,11 @@ public:
                 if (ans_l != 0)
                     return make_pair(true, 1);
                 // 右边不等于0？
-                koopa_str += "%" + to_string(reg_cnt) + " = ne %";
+                koopa_str += "  %" + to_string(reg_cnt) + " = ne %";
                 koopa_str += to_string(rightreg) + ", 0\n";
                 reg_cnt++;
                 // 对两边结果取或
-                koopa_str += "%" + to_string(reg_cnt) + " = or ";
+                koopa_str += "  %" + to_string(reg_cnt) + " = or ";
                 koopa_str += to_string(ans_l) + ", %" + to_string(reg_cnt - 1) + "\n";
                 reg_cnt++;
             }
@@ -1205,11 +1400,12 @@ public:
                 if (ans_r != 0)
                     return make_pair(true, 1);
                 // 左边不等于0？不等于则返回1
-                koopa_str += "%" + to_string(reg_cnt) + " = ne %";
+                koopa_str += "  %" + to_string(reg_cnt) + " = ne %";
                 koopa_str += to_string(leftreg) + ", 0\n";
                 reg_cnt++;
                 // 对两边结果取或
-                koopa_str += "%" + to_string(reg_cnt) + " = or ";
+                // 好像不需要
+                koopa_str += "  %" + to_string(reg_cnt) + " = or ";
                 koopa_str += to_string(ans_r) + ", %" + to_string(reg_cnt - 1) + "\n";
                 reg_cnt++;
             }
@@ -1217,15 +1413,15 @@ public:
             {
                 /* 逻辑或 */
                 // 左边不等于0？不等于则返回1
-                koopa_str += "%" + to_string(reg_cnt) + " = ne %";
+                koopa_str += "  %" + to_string(reg_cnt) + " = ne %";
                 koopa_str += to_string(leftreg) + ", 0\n";
                 reg_cnt++;
                 // 右边不等于0？
-                koopa_str += "%" + to_string(reg_cnt) + " = ne %";
+                koopa_str += "  %" + to_string(reg_cnt) + " = ne %";
                 koopa_str += to_string(rightreg) + ", 0\n";
                 reg_cnt++;
                 // 对两边结果取或
-                koopa_str += "%" + to_string(reg_cnt) + " = or %";
+                koopa_str += "  %" + to_string(reg_cnt) + " = or %";
                 koopa_str += to_string(reg_cnt - 2) + ", %" + to_string(reg_cnt - 1) + "\n";
                 reg_cnt++;
             }
@@ -1324,7 +1520,7 @@ public:
     pair<bool, int> Koopa() const override
     {
         int val = (constinitval->Koopa()).second;
-        Value tmp(CONSTANT, val);
+        Value tmp(CONSTANT, val, block_now);
         symbol_list.addSymbol(ident, tmp);
 
         // var_type[ident] = CONSTANT;
@@ -1425,7 +1621,7 @@ public:
         // 变量
         else
         {
-            koopa_str += "%" + to_string(reg_cnt) + " = load @" + ident + "_" + to_string(symbol_list.cur_index) + "\n";
+            koopa_str += "  %" + to_string(reg_cnt) + " = load @" + ident + "_" + to_string(cur_var.name_index) + "\n";
             reg_cnt++;
             // !!!
             return make_pair(false, -1);
@@ -1459,6 +1655,7 @@ public:
 };
 
 // VarDef 变量定义 IDENT | IDENT "=" InitVal lv4
+// 变量名分配策略：在第index层基本块，变量命名为 ident_index
 class VarDefAST : public BaseAST
 {
 public:
@@ -1481,13 +1678,13 @@ public:
         if (rule == 0)
         {
             // var_type[ident] = VAR;
-            Value tmp(VAR, 0);
+            Value tmp(VAR, 0, block_now);
 
-            string name = ident + "_" + to_string(symbol_list.index);
+            string name = ident + "_" + to_string(block_now);
 
             symbol_list.addSymbol(ident, tmp);
 
-            koopa_str += "@" + name + " = alloc i32 " + "\n";
+            koopa_str += "  @" + name + " = alloc i32 " + "\n";
             return make_pair(false, -1);
         }
         else
@@ -1495,21 +1692,21 @@ public:
             // var_type[ident] = VAR;
             // var_val[ident] = initval->cal_value();
             int val = (initval->Koopa()).second;
-            Value tmp(VAR, val);
+            Value tmp(VAR, val, block_now);
 
-            string name = ident + "_" + to_string(symbol_list.index);
+            string name = ident + "_" + to_string(block_now);
 
             symbol_list.addSymbol(ident, tmp);
 
-            koopa_str += "@" + name + " = alloc i32 " + "\n";
+            koopa_str += "  @" + name + " = alloc i32 " + "\n";
             pair<bool, int> res = initval->Koopa();
             if (res.first)
             {
-                koopa_str += "store " + to_string(res.second) + ", @" + name + "\n";
+                koopa_str += "  store " + to_string(res.second) + ", @" + name + "\n";
             }
             else
             {
-                koopa_str += "store %" + to_string(reg_cnt - 1) + ", @" + name + "\n";
+                koopa_str += "  store %" + to_string(reg_cnt - 1) + ", @" + name + "\n";
             }
             return make_pair(false, -1);
         }

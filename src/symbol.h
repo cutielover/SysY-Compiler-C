@@ -20,8 +20,9 @@ struct Value
 {
     TYPE type;
     int val;
+    int name_index;
     Value() = default;
-    Value(TYPE type_, int val_) : type(type_), val(val_) {}
+    Value(TYPE type_, int val_, int name_index_) : type(type_), val(val_), name_index(name_index_) {}
 };
 
 // 符号表
@@ -32,13 +33,16 @@ class SymbolList
 {
 public:
     vector<unordered_map<string, Value>> symbol_list_array;
+    // @index: 符号表数量
     int index;
+    // @cur_index:
     int cur_index;
     SymbolList()
     {
         index = 0;
         cur_index = 0;
     }
+    int block_num();
     void newMap();
     void deleteMap();
     void addSymbol(string name, Value value);

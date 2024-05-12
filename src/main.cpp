@@ -13,6 +13,7 @@
 using namespace std;
 string koopa_str;
 int reg_cnt = 0;
+int if_cnt = 0;
 
 SymbolList symbol_list;
 
