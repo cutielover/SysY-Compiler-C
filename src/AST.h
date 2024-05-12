@@ -169,6 +169,8 @@ public:
         {
             if (block_end[block_now])
             {
+                // koopa_str += "\n";
+                // koopa_str += "Block" + to_string(block_now) + " end, Stop Process BlockItem\n\n";
                 break;
             }
             i->Koopa();
@@ -281,6 +283,7 @@ public:
             {
                 koopa_str += "  store %" + to_string(reg_cnt - 1) + ", @" + leval->name() + "\n";
             }
+            block_end[block_now] = false;
         }
         else if (rule == 1)
         {
@@ -308,6 +311,7 @@ public:
         {
             if (exp != nullptr)
                 exp->Koopa();
+            block_end[block_now] = false;
         }
         else if (rule == 3)
         {
