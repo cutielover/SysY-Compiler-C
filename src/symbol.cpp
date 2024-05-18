@@ -5,7 +5,6 @@ void SymbolList::newMap()
 {
     symbol_list_array.push_back(unordered_map<string, Value>());
     index++;
-    cur_index++;
 }
 
 void SymbolList::deleteMap()
@@ -29,9 +28,4 @@ Value SymbolList::getSymbol(string name)
         }
     }
     return Value();
-}
-
-int SymbolList::block_num()
-{
-    return index;
 }

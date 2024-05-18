@@ -98,6 +98,10 @@ void Visit(const koopa_raw_basic_block_t &bb)
     // 执行一些其他的必要操作
     // ...
     // 访问所有指令
+    if (strcmp(bb->name + 1, "entry"))
+    {
+        cout << bb->name + 1 << ":\n";
+    }
     Visit(bb->insts);
 }
 
@@ -131,6 +135,14 @@ void Visit(const koopa_raw_value_t &value)
     case KOOPA_RVT_STORE:
         // 访问 store 指令
         Visit(kind.data.store);
+        break;
+    case KOOPA_RVT_BRANCH:
+        // 访问 branch 指令
+        Visit(kind.data.branch);
+        break;
+    case KOOPA_RVT_JUMP:
+        // 访问 jump 指令
+        Visit(kind.data.jump);
         break;
     default:
         // 其他类型暂时遇不到
@@ -366,6 +378,20 @@ void Visit(const koopa_raw_return_t &ret)
 void Visit(const koopa_raw_integer_t &integer)
 {
     cout << integer.value;
+}
+
+// lv6 branch指令
+void Visit(const koopa_raw_branch_t &branch)
+{
+    string reg_branch = load_to_reg(branch.cond, "t0");
+    cout << "  bnez " << reg_branch << ", " << branch.true_bb->name + 1 << "\n";
+    cout << "  j " << branch.false_bb->name + 1 << "\n";
+}
+
+// lv6 jump指令
+void Visit(const koopa_raw_jump_t &jump)
+{
+    cout << "  j " << jump.target->name + 1 << "\n";
 }
 
 // ...
