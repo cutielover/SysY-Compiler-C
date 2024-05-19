@@ -183,7 +183,7 @@ string load_to_reg(const koopa_raw_value_t &value, const string &reg)
         {
             cout << "  li, t3, " << stack_pos << "\n";
             cout << "  add t3, t3, sp\n";
-            cout << "  lw " << reg << ", t3\n";
+            cout << "  lw " << reg << ", 0(t3)\n";
         }
         else
         {
@@ -342,7 +342,7 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     {
         cout << "  li t4, " << stack_pos << "\n";
         cout << "  add t4, t4, sp\n";
-        cout << "  sw t0, t4\n";
+        cout << "  sw t0, 0(t4)\n";
     }
     else
     {
@@ -359,7 +359,7 @@ void Visit(const koopa_raw_store_t &store)
     {
         cout << "  li t4, " << stack_pos << "\n";
         cout << "  add t4, t4, sp\n";
-        cout << "  sw " << reg << ", t4\n";
+        cout << "  sw " << reg << ", 0(t4)\n";
     }
     else
     {
@@ -376,11 +376,11 @@ void Visit(const koopa_raw_load_t &load, const koopa_raw_value_t &value)
     {
         cout << "  li t3, " << stack_pos << "\n";
         cout << "  add t3, t3, sp\n";
-        cout << "  sw t0, t3\n";
+        cout << "  sw t0, 0(t3)\n";
     }
     else
     {
-        cout << "  sw " << "t0" << ", " << stack_pos << "(sp)\n";
+        cout << "  sw t0, " << stack_pos << "(sp)\n";
     }
 }
 // lv4完成
@@ -401,7 +401,7 @@ void Visit(const koopa_raw_return_t &ret)
         {
             cout << "  li t0, " << stack_pos << "\n";
             cout << "  add t0, t0, sp\n";
-            cout << "  lw a0, t0\n";
+            cout << "  lw a0, 0(t0)\n";
         }
         else
         {
