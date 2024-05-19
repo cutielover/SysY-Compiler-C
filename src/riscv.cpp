@@ -179,7 +179,7 @@ string load_to_reg(const koopa_raw_value_t &value, const string &reg)
     else
     {
         int stack_pos = get_stack_pos(value);
-        if (stack_pos >= 2048)
+        if (stack_pos >= 2048 || stack_pos < -2048)
         {
             cout << "  li, t3, " << stack_pos << "\n";
             cout << "  add t3, t3, sp\n";
@@ -338,7 +338,7 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     }
     // 结果保存到栈帧
     int stack_pos = get_stack_pos(value);
-    if (stack_pos >= 2048)
+    if (stack_pos >= 2048 || stack_pos < -2048)
     {
         cout << "  li t4, " << stack_pos << "\n";
         cout << "  add t4, t4, sp\n";
@@ -355,7 +355,7 @@ void Visit(const koopa_raw_store_t &store)
 {
     string reg = load_to_reg(store.value, "t0");
     int stack_pos = get_stack_pos(store.dest);
-    if (stack_pos >= 2048)
+    if (stack_pos >= 2048 || stack_pos < -2048)
     {
         cout << "  li t4, " << stack_pos << "\n";
         cout << "  add t4, t4, sp\n";
@@ -372,7 +372,7 @@ void Visit(const koopa_raw_load_t &load, const koopa_raw_value_t &value)
 {
     load_to_reg(load.src, "t0");
     int stack_pos = get_stack_pos(value);
-    if (stack_pos >= 2048)
+    if (stack_pos >= 2048 || stack_pos < -2048)
     {
         cout << "  li t3, " << stack_pos << "\n";
         cout << "  add t3, t3, sp\n";
@@ -397,7 +397,7 @@ void Visit(const koopa_raw_return_t &ret)
     else
     {
         int stack_pos = regs[ret.value];
-        if (stack_pos >= 2048)
+        if (stack_pos >= 2048 || stack_pos < -2048)
         {
             cout << "  li t0, " << stack_pos << "\n";
             cout << "  add t0, t0, sp\n";
