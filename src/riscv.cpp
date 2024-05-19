@@ -12,6 +12,7 @@ static int stack_offset = 0;
 static int align_t = 16;
 static int sp_size;
 
+// 返回变量在栈上的偏移量
 int get_stack_pos(const koopa_raw_value_t &value)
 {
     if (regs.count(value))
@@ -76,14 +77,14 @@ void Visit(const koopa_raw_function_t &func)
     // 16字节对齐
     sp_size = (sp_size + align_t - 1) & ~(align_t - 1);
     // 函数的prologue
-    if (sp_size > 2048)
+    if (sp_size >= 2048)
     {
-        cout << "  li t0, " << -sp_size << "\n";
+        cout << "  li t0, -" << sp_size << "\n";
         cout << "  add sp, sp, t0\n";
     }
     else
     {
-        cout << "  addi sp, sp, " << -sp_size << "\n";
+        cout << "  addi sp, sp, -" << sp_size << "\n";
     }
     // 访问所有基本块
     // 此时只有一个基本块
@@ -180,7 +181,8 @@ string load_to_reg(const koopa_raw_value_t &value, const string &reg)
         int stack_pos = get_stack_pos(value);
         if (stack_pos >= 2048)
         {
-            cout << "  addi t3, sp, " << stack_pos << "\n";
+            cout << "  li, t3, " << stack_pos << "\n";
+            cout << "  add t3, t3, sp\n";
             cout << "  lw " << reg << ", t3\n";
         }
         else
@@ -338,7 +340,8 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     int stack_pos = get_stack_pos(value);
     if (stack_pos >= 2048)
     {
-        cout << "  addi t4, sp, " << stack_pos << "\n";
+        cout << "  li t4, " << stack_pos << "\n";
+        cout << "  add t4, t4, sp\n";
         cout << "  sw t0, t4\n";
     }
     else
@@ -350,11 +353,12 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
 // store指令
 void Visit(const koopa_raw_store_t &store)
 {
-    string reg = load_to_reg(store.value, "t2");
+    string reg = load_to_reg(store.value, "t0");
     int stack_pos = get_stack_pos(store.dest);
     if (stack_pos >= 2048)
     {
-        cout << "  addi t4, sp, " << stack_pos << "\n";
+        cout << "  li t4, " << stack_pos << "\n";
+        cout << "  add t4, t4, sp\n";
         cout << "  sw " << reg << ", t4\n";
     }
     else
@@ -370,7 +374,8 @@ void Visit(const koopa_raw_load_t &load, const koopa_raw_value_t &value)
     int stack_pos = get_stack_pos(value);
     if (stack_pos >= 2048)
     {
-        cout << "  addi t3, sp, " << stack_pos << "\n";
+        cout << "  li t3, " << stack_pos << "\n";
+        cout << "  add t3, t3, sp\n";
         cout << "  sw t0, t3\n";
     }
     else
@@ -394,7 +399,8 @@ void Visit(const koopa_raw_return_t &ret)
         int stack_pos = regs[ret.value];
         if (stack_pos >= 2048)
         {
-            cout << "  addi t0, sp, " << stack_pos << "\n";
+            cout << "  li t0, " << stack_pos << "\n";
+            cout << "  add t0, t0, sp\n";
             cout << "  lw a0, t0\n";
         }
         else
