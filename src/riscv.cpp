@@ -502,5 +502,5 @@ int cal_inst_size(const koopa_raw_value_t &inst)
     default:
         break;
     }
-    return 4;
+    return 0;
 }
