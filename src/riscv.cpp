@@ -6,22 +6,21 @@ using namespace std;
 // 记录一条指令对应的寄存器
 // lv4：目前暂时全部用于记录变量在栈帧中的位置，即offset(sp)
 // 因为目前所有变量/指令都存放在栈帧里
-unordered_map<koopa_raw_value_t, string> regs;
+unordered_map<koopa_raw_value_t, int> regs;
 static int stack_offset = 0;
 
 static int align_t = 16;
 static int sp_size;
 
-string get_stack_pos(const koopa_raw_value_t &value)
+int get_stack_pos(const koopa_raw_value_t &value)
 {
     if (regs.count(value))
     {
         return regs[value];
     }
-    string stack_pos = to_string(stack_offset) + "(sp)";
-    regs[value] = stack_pos;
+    regs[value] = stack_offset;
     stack_offset += 4;
-    return stack_pos;
+    return regs[value];
 }
 
 // 访问 raw program
@@ -178,9 +177,17 @@ string load_to_reg(const koopa_raw_value_t &value, const string &reg)
     // 变量 位于栈上
     else
     {
-        cout << "  lw " << reg << ", ";
-        cout << get_stack_pos(value);
-        cout << "\n";
+        int stack_pos = get_stack_pos(value);
+        if (stack_pos >= 2048)
+        {
+            cout << "  addi t3, sp, " << stack_pos << "\n";
+            cout << "  lw " << reg << ", t3\n";
+        }
+        else
+        {
+            cout << "  lw " << reg << ", ";
+            cout << stack_pos << "(sp)" << "\n";
+        }
         return reg;
     }
 
@@ -328,23 +335,49 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     }
     }
     // 结果保存到栈帧
-    cout << "  sw t0, " << get_stack_pos(value) << "\n";
+    int stack_pos = get_stack_pos(value);
+    if (stack_pos >= 2048)
+    {
+        cout << "  addi t4, sp, " << stack_pos << "\n";
+        cout << "  sw t0, t4\n";
+    }
+    else
+    {
+        cout << "  sw t0, " << stack_pos << "(sp)\n";
+    }
 }
 
 // store指令
 void Visit(const koopa_raw_store_t &store)
 {
     string reg = load_to_reg(store.value, "t2");
-    cout << "  sw " << reg << ", " << get_stack_pos(store.dest) << "\n";
+    int stack_pos = get_stack_pos(store.dest);
+    if (stack_pos >= 2048)
+    {
+        cout << "  addi t4, sp, " << stack_pos << "\n";
+        cout << "  sw " << reg << ", t4\n";
+    }
+    else
+    {
+        cout << "  sw " << reg << ", " << stack_pos << "(sp)\n";
+    }
 }
 
 // load指令
 void Visit(const koopa_raw_load_t &load, const koopa_raw_value_t &value)
 {
     load_to_reg(load.src, "t0");
-    cout << "  sw " << "t0" << ", " << get_stack_pos(value) << "\n";
+    int stack_pos = get_stack_pos(value);
+    if (stack_pos >= 2048)
+    {
+        cout << "  addi t3, sp, " << stack_pos << "\n";
+        cout << "  sw t0, t3\n";
+    }
+    else
+    {
+        cout << "  sw " << "t0" << ", " << stack_pos << "(sp)\n";
+    }
 }
-
 // lv4完成
 // ret指令
 void Visit(const koopa_raw_return_t &ret)
@@ -358,8 +391,16 @@ void Visit(const koopa_raw_return_t &ret)
     }
     else
     {
-        string ret_reg = regs[ret.value];
-        cout << "  lw a0, " << ret_reg << "\n";
+        int stack_pos = regs[ret.value];
+        if (stack_pos >= 2048)
+        {
+            cout << "  addi t0, sp, " << stack_pos << "\n";
+            cout << "  lw a0, t0\n";
+        }
+        else
+        {
+            cout << "  lw a0, " << stack_pos << "(sp)\n";
+        }
     }
     // 函数的epilogue
     if (sp_size >= 2048)
