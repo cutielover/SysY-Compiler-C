@@ -36,13 +36,10 @@ public:
     // @index: 符号表数量
     int index;
     // @cur_index:
-    int cur_index;
     SymbolList()
     {
         index = 0;
-        cur_index = 0;
     }
-    int block_num();
     void newMap();
     void deleteMap();
     void addSymbol(string name, Value value);

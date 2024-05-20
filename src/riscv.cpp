@@ -6,22 +6,22 @@ using namespace std;
 // 记录一条指令对应的寄存器
 // lv4：目前暂时全部用于记录变量在栈帧中的位置，即offset(sp)
 // 因为目前所有变量/指令都存放在栈帧里
-unordered_map<koopa_raw_value_t, string> regs;
+unordered_map<koopa_raw_value_t, int> regs;
 static int stack_offset = 0;
 
 static int align_t = 16;
 static int sp_size;
 
-string get_stack_pos(const koopa_raw_value_t &value)
+// 返回变量在栈上的偏移量
+int get_stack_pos(const koopa_raw_value_t &value)
 {
     if (regs.count(value))
     {
         return regs[value];
     }
-    string stack_pos = to_string(stack_offset) + "(sp)";
-    regs[value] = stack_pos;
+    regs[value] = stack_offset;
     stack_offset += 4;
-    return stack_pos;
+    return regs[value];
 }
 
 // 访问 raw program
@@ -77,14 +77,14 @@ void Visit(const koopa_raw_function_t &func)
     // 16字节对齐
     sp_size = (sp_size + align_t - 1) & ~(align_t - 1);
     // 函数的prologue
-    if (sp_size > 2048)
+    if (sp_size >= 2048)
     {
-        cout << "  li t0, " << -sp_size << "\n";
+        cout << "  li t0, -" << sp_size << "\n";
         cout << "  add sp, sp, t0\n";
     }
     else
     {
-        cout << "  addi sp, sp, " << -sp_size << "\n";
+        cout << "  addi sp, sp, -" << sp_size << "\n";
     }
     // 访问所有基本块
     // 此时只有一个基本块
@@ -98,6 +98,10 @@ void Visit(const koopa_raw_basic_block_t &bb)
     // 执行一些其他的必要操作
     // ...
     // 访问所有指令
+    if (strcmp(bb->name + 1, "entry"))
+    {
+        cout << bb->name + 1 << ":\n";
+    }
     Visit(bb->insts);
 }
 
@@ -131,6 +135,14 @@ void Visit(const koopa_raw_value_t &value)
     case KOOPA_RVT_STORE:
         // 访问 store 指令
         Visit(kind.data.store);
+        break;
+    case KOOPA_RVT_BRANCH:
+        // 访问 branch 指令
+        Visit(kind.data.branch);
+        break;
+    case KOOPA_RVT_JUMP:
+        // 访问 jump 指令
+        Visit(kind.data.jump);
         break;
     default:
         // 其他类型暂时遇不到
@@ -166,9 +178,18 @@ string load_to_reg(const koopa_raw_value_t &value, const string &reg)
     // 变量 位于栈上
     else
     {
-        cout << "  lw " << reg << ", ";
-        cout << get_stack_pos(value);
-        cout << "\n";
+        int stack_pos = get_stack_pos(value);
+        if (stack_pos >= 2048 || stack_pos < -2048)
+        {
+            cout << "  li t3, " << stack_pos << "\n";
+            cout << "  add t3, t3, sp\n";
+            cout << "  lw " << reg << ", 0(t3)\n";
+        }
+        else
+        {
+            cout << "  lw " << reg << ", ";
+            cout << stack_pos << "(sp)\n";
+        }
         return reg;
     }
 
@@ -179,13 +200,13 @@ string load_to_reg(const koopa_raw_value_t &value, const string &reg)
 // binary指令
 void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
 {
+    string reg_l = load_to_reg(binary.lhs, "t0");
+    string reg_r = load_to_reg(binary.rhs, "t1");
     switch (binary.op)
     {
     case KOOPA_RBO_NOT_EQ:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  xor " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
         cout << "  snez " << reg_l << ", " << reg_l << "\n";
@@ -195,8 +216,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_EQ:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  xor " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
         cout << "  seqz " << reg_l << ", " << reg_l << "\n";
@@ -206,8 +225,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_GT:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  sgt " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
@@ -216,8 +233,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_LT:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  slt " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
@@ -226,8 +241,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_GE:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  slt " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
         cout << "  seqz " << reg_l << ", " << reg_l << "\n";
@@ -237,8 +250,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_LE:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  sgt " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
         cout << "  seqz " << reg_l << ", " << reg_l << "\n";
@@ -248,8 +259,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_ADD:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  add " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
@@ -258,9 +267,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_SUB:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
-
         cout << "  sub " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
         break;
@@ -268,8 +274,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_MUL:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  mul " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
@@ -278,8 +282,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_DIV:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  div " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
@@ -288,8 +290,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_MOD:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
         cout << "  rem " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
         break;
@@ -297,8 +297,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_AND:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  and " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
@@ -307,8 +305,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_OR:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  or " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
@@ -316,23 +312,52 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     }
     }
     // 结果保存到栈帧
-    cout << "  sw t0, " << get_stack_pos(value) << "\n";
+    int stack_pos = get_stack_pos(value);
+    if (stack_pos >= 2048 || stack_pos < -2048)
+    {
+        cout << "  li t4, " << stack_pos << "\n";
+        cout << "  add t4, t4, sp\n";
+        cout << "  sw t0, 0(t4)\n";
+    }
+    else
+    {
+        cout << "  sw t0, " << stack_pos << "(sp)\n";
+    }
 }
 
 // store指令
 void Visit(const koopa_raw_store_t &store)
 {
-    string reg = load_to_reg(store.value, "t2");
-    cout << "  sw " << reg << ", " << get_stack_pos(store.dest) << "\n";
+    string reg = load_to_reg(store.value, "t0");
+    int stack_pos = get_stack_pos(store.dest);
+    if (stack_pos >= 2048 || stack_pos < -2048)
+    {
+        cout << "  li t4, " << stack_pos << "\n";
+        cout << "  add t4, t4, sp\n";
+        cout << "  sw " << reg << ", 0(t4)\n";
+    }
+    else
+    {
+        cout << "  sw " << reg << ", " << stack_pos << "(sp)\n";
+    }
 }
 
 // load指令
 void Visit(const koopa_raw_load_t &load, const koopa_raw_value_t &value)
 {
     load_to_reg(load.src, "t0");
-    cout << "  sw " << "t0" << ", " << get_stack_pos(value) << "\n";
+    int stack_pos = get_stack_pos(value);
+    if (stack_pos >= 2048 || stack_pos < -2048)
+    {
+        cout << "  li t3, " << stack_pos << "\n";
+        cout << "  add t3, t3, sp\n";
+        cout << "  sw t0, 0(t3)\n";
+    }
+    else
+    {
+        cout << "  sw t0, " << stack_pos << "(sp)\n";
+    }
 }
-
 // lv4完成
 // ret指令
 void Visit(const koopa_raw_return_t &ret)
@@ -346,8 +371,17 @@ void Visit(const koopa_raw_return_t &ret)
     }
     else
     {
-        string ret_reg = regs[ret.value];
-        cout << "  lw a0, " << ret_reg << "\n";
+        int stack_pos = regs[ret.value];
+        if (stack_pos >= 2048 || stack_pos < -2048)
+        {
+            cout << "  li t0, " << stack_pos << "\n";
+            cout << "  add t0, t0, sp\n";
+            cout << "  lw a0, 0(t0)\n";
+        }
+        else
+        {
+            cout << "  lw a0, " << stack_pos << "(sp)\n";
+        }
     }
     // 函数的epilogue
     if (sp_size >= 2048)
@@ -366,6 +400,20 @@ void Visit(const koopa_raw_return_t &ret)
 void Visit(const koopa_raw_integer_t &integer)
 {
     cout << integer.value;
+}
+
+// lv6 branch指令
+void Visit(const koopa_raw_branch_t &branch)
+{
+    string reg_branch = load_to_reg(branch.cond, "t0");
+    cout << "  bnez " << reg_branch << ", " << branch.true_bb->name + 1 << "\n";
+    cout << "  j " << branch.false_bb->name + 1 << "\n";
+}
+
+// lv6 jump指令
+void Visit(const koopa_raw_jump_t &jump)
+{
+    cout << "  j " << jump.target->name + 1 << "\n";
 }
 
 // ...
@@ -429,5 +477,5 @@ int cal_inst_size(const koopa_raw_value_t &inst)
     default:
         break;
     }
-    return 4;
+    return 0;
 }

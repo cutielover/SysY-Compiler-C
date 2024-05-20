@@ -12,13 +12,13 @@ extern string koopa_str;
 extern int reg_cnt;
 extern int if_cnt;
 
+// 警惕使用全局变量
 static int block_cnt;
 static int block_now;
-static int block_last;
+static int logical;
 static vector<bool> block_end;
 static unordered_map<int, int> block_parent;
 
-static bool re = false;
 static bool if_end = true;
 
 extern SymbolList symbol_list;
@@ -31,16 +31,12 @@ public:
     virtual ~BaseAST() = default;
 
     virtual void Dump() const = 0;
-
     // !!!
     // 用于优化，对于能直接计算出值的表达式，直接返回值，减少寄存器浪费
     // bool: true-能计算 false-不能
     // int: 能计算出的值；对于不能计算出的值，返回-1
     virtual pair<bool, int> Koopa() const { return make_pair(false, -1); }
-
     virtual string name() const { return "oops"; };
-
-    virtual int cal_value() const { return 0; }
 };
 
 // lv4+
@@ -150,12 +146,10 @@ public:
 
     pair<bool, int> Koopa() const override
     {
-        re = false;
         symbol_list.newMap();
 
         // 块计数：当前块为修改后的block_cnt
         block_cnt++;
-        block_last = block_now;
         int parent_block = block_now;
         // 记录：当前块的父亲为block_last（即上一个执行的块）
         // 边界：起始block_cnt为1，block_now为0
@@ -474,7 +468,6 @@ public:
     {
         return lorexp->Koopa();
     }
-    int cal_value() const override { return lorexp->cal_value(); }
 };
 
 // lv4+
@@ -517,19 +510,6 @@ public:
         {
             return lval->Koopa();
         }
-    }
-    int cal_value() const override
-    {
-        if (rule == 0)
-        {
-            return exp->cal_value();
-        }
-        else if (rule == 1)
-        {
-            return number;
-        }
-        // error case
-        return lval->cal_value();
     }
 };
 
@@ -605,28 +585,6 @@ public:
                 }
             }
             return make_pair(false, -1);
-        }
-    }
-    int cal_value() const override
-    {
-        if (rule == 0)
-        {
-            return primaryexp->cal_value();
-        }
-        else
-        {
-            if (op == "!")
-            {
-                return !unaryexp->cal_value();
-            }
-            else if (op == "-")
-            {
-                return -unaryexp->cal_value();
-            }
-            else
-            {
-                return unaryexp->cal_value();
-            }
         }
     }
 };
@@ -761,26 +719,6 @@ public:
             return make_pair(false, -1);
         }
     }
-    int cal_value() const override
-    {
-        if (rule == 0)
-            return unaryexp->cal_value();
-        else
-        {
-            if (op == "*")
-            {
-                return mulexp->cal_value() * unaryexp->cal_value();
-            }
-            else if (op == "/")
-            {
-                return mulexp->cal_value() / unaryexp->cal_value();
-            }
-            else
-            {
-                return mulexp->cal_value() % unaryexp->cal_value();
-            }
-        }
-    }
 };
 
 // lv4+
@@ -884,24 +822,6 @@ public:
             }
 
             return make_pair(false, -1);
-        }
-    }
-    int cal_value() const override
-    {
-        if (rule == 0)
-        {
-            return mulexp->cal_value();
-        }
-        else
-        {
-            if (op == "+")
-            {
-                return addexp->cal_value() + mulexp->cal_value();
-            }
-            else
-            {
-                return addexp->cal_value() - mulexp->cal_value();
-            }
         }
     }
 };
@@ -1062,32 +982,6 @@ public:
             return make_pair(false, -1);
         }
     }
-    int cal_value() const override
-    {
-        if (rule == 0)
-        {
-            return addexp->cal_value();
-        }
-        else
-        {
-            if (op == "<")
-            {
-                return relexp->cal_value() < addexp->cal_value();
-            }
-            else if (op == ">")
-            {
-                return relexp->cal_value() > addexp->cal_value();
-            }
-            else if (op == "<=")
-            {
-                return relexp->cal_value() <= addexp->cal_value();
-            }
-            else
-            {
-                return relexp->cal_value() >= addexp->cal_value();
-            }
-        }
-    }
 };
 
 // lv4+
@@ -1196,24 +1090,9 @@ public:
             return make_pair(false, -1);
         }
     }
-    int cal_value() const override
-    {
-        if (rule == 0)
-            return relexp->cal_value();
-        else
-        {
-            if (op == "==")
-            {
-                return eqexp->cal_value() == relexp->cal_value();
-            }
-            else
-            {
-                return eqexp->cal_value() != relexp->cal_value();
-            }
-        }
-    }
 };
 
+// lv6.2短路求值
 // lv4+
 // LAndExp ::= EqExp | LAndExp AND EqExp lv3
 class LAndExpAST : public BaseAST
@@ -1246,93 +1125,76 @@ public:
         }
         else
         {
+            logical++;
+            int now_logic = logical;
+
+            string then_tag = "%not_zero_" + to_string(now_logic);
+            string end_tag = "%is_zero_" + to_string(now_logic);
+            string res_tag = "@result_" + to_string(now_logic);
+
+            // 规避错误：Instruction does not dominate all uses!
+            koopa_str += "  " + res_tag + " = alloc i32\n";
+            koopa_str += "  store 0, " + res_tag + "\n";
+
             pair<bool, int> res_l = landexp->Koopa();
             int leftreg = reg_cnt - 1;
-            pair<bool, int> res_r = eqexp->Koopa();
-            int rightreg = reg_cnt - 1;
+            // 短路求值：lhs是0？
+            // step1: 判断lhs是否是0
+            // case1：lhs是一个数字
 
-            if (res_l.first && res_r.first)
+            if (res_l.first)
             {
-                return make_pair(true, res_l.second && res_r.second);
-            }
-            else if (res_l.first && !res_r.first)
-            {
-                /* 逻辑与 */
-                // 左边逻辑取反
-                // koopa_str += "%" + to_string(reg_cnt) + " = eq %";
-                // koopa_str += to_string(leftreg) + ", 0\n";
-                // reg_cnt++;
                 if (res_l.second == 0)
+                {
                     return make_pair(true, 0);
-                // 右边逻辑取反
-                koopa_str += "  %" + to_string(reg_cnt) + " = eq %";
-                koopa_str += to_string(rightreg) + ", 0\n";
-                reg_cnt++;
-                // 对两边逻辑取反的结果取或
-                koopa_str += "  %" + to_string(reg_cnt) + " = or ";
-                koopa_str += to_string(!res_l.second) + ", %" + to_string(reg_cnt - 1) + "\n";
-                reg_cnt++;
-                // 再取反
-                koopa_str += "  %" + to_string(reg_cnt) + " = eq %";
-                koopa_str += to_string(reg_cnt - 1) + ", 0\n";
-                reg_cnt++;
-            }
-            else if (!res_l.first && res_r.first)
-            {
-                if (res_r.second == 0)
-                    return make_pair(true, 0);
-                /* 逻辑与 */
-                // 左边逻辑取反
-                koopa_str += "  %" + to_string(reg_cnt) + " = eq %";
-                koopa_str += to_string(leftreg) + ", 0\n";
-                reg_cnt++;
-                // 右边逻辑取反
-                // koopa_str += "%" + to_string(reg_cnt) + " = eq %";
-                // koopa_str += to_string(rightreg) + ", 0\n";
-                // reg_cnt++;
-                // 对两边逻辑取反的结果取或
-                koopa_str += "  %" + to_string(reg_cnt) + " = or ";
-                koopa_str += to_string(!res_r.second) + ", %" + to_string(reg_cnt - 1) + "\n";
-                reg_cnt++;
-                // 再取反
-                koopa_str += "  %" + to_string(reg_cnt) + " = eq %";
-                koopa_str += to_string(reg_cnt - 1) + ", 0\n";
-                reg_cnt++;
+                }
+                // 如果不是0的话，直接忽略掉就好了？
+                // 不行？
+                // 为了统一后续的格式，要放到内存里？
+                koopa_str += "  jump " + then_tag + "\n\n";
             }
             else
             {
-                /* 逻辑与 */
-                // 左边逻辑取反
-                koopa_str += "  %" + to_string(reg_cnt) + " = eq %";
-                koopa_str += to_string(leftreg) + ", 0\n";
-                reg_cnt++;
-                // 右边逻辑取反
-                koopa_str += "  %" + to_string(reg_cnt) + " = eq %";
-                koopa_str += to_string(rightreg) + ", 0\n";
-                reg_cnt++;
-                // 对两边逻辑取反的结果取或
-                koopa_str += "  %" + to_string(reg_cnt) + " = or %";
-                koopa_str += to_string(reg_cnt - 2) + ", %" + to_string(reg_cnt - 1) + "\n";
-                reg_cnt++;
-                // 再取反
-                koopa_str += "  %" + to_string(reg_cnt) + " = eq %";
-                koopa_str += to_string(reg_cnt - 1) + ", 0\n";
-                reg_cnt++;
+                koopa_str += "  br %" + to_string(leftreg) + ", " + then_tag + ", " + end_tag + "\n\n";
             }
+            koopa_str += then_tag + ":\n";
+
+            pair<bool, int> res_r = eqexp->Koopa();
+            int rightreg = reg_cnt - 1;
+
+            // 这里，lhs非0
+            if (res_r.first)
+            {
+                if (res_r.second == 0)
+                {
+                    koopa_str += "  jump " + end_tag + "\n\n";
+                }
+                else
+                { // 已知只有非0的时候会到达这里
+                    koopa_str += "  store 1, " + res_tag + "\n";
+                    koopa_str += "  jump " + end_tag + "\n\n";
+                }
+            }
+            else
+            {
+
+                koopa_str += "  %" + to_string(reg_cnt) + " = ne %" + to_string(rightreg) + ", 0\n";
+                reg_cnt++;
+                koopa_str += "  store %" + to_string(reg_cnt - 1) + ", " + res_tag + "\n";
+                koopa_str += "  jump " + end_tag + "\n\n";
+            }
+
+            koopa_str += end_tag + ":\n";
+
+            koopa_str += "  %" + to_string(reg_cnt) + " = load " + res_tag + "\n";
+            reg_cnt++;
+
             return make_pair(false, -1);
-        }
-    }
-    int cal_value() const override
-    {
-        if (rule == 0)
-            return eqexp->cal_value();
-        else
-        {
-            return landexp->cal_value() && eqexp->cal_value();
         }
     }
 };
 
+// lv6.2短路求值
 // lv4+
 // LOrExp ::= LAndExp | LOrExp OR LAndExp lv3
 class LOrExpAST : public BaseAST
@@ -1364,80 +1226,65 @@ public:
         }
         else
         {
+            logical++;
+            int now_logic = logical;
+
+            string then_tag = "%is_zero_" + to_string(now_logic);
+            string end_tag = "%not_zero_" + to_string(now_logic);
+            string res_tag = "@result_" + to_string(now_logic);
+
+            // 规避错误：Instruction does not dominate all uses!
+            koopa_str += "  " + res_tag + " = alloc i32\n";
+            koopa_str += "  store 1, " + res_tag + "\n";
+
             pair<bool, int> res_l = lorexp->Koopa();
             int leftreg = reg_cnt - 1;
-            pair<bool, int> res_r = landexp->Koopa();
-            int rightreg = reg_cnt - 1;
 
-            if (res_l.first && res_r.first)
+            if (res_l.first)
             {
-                int ans = res_l.second || res_r.second;
-                return make_pair(true, ans);
-            }
-            else if (res_l.first && !res_r.first)
-            {
-                /* 逻辑或 */
-                // 左边不等于0？不等于则返回1
-                // koopa_str += "%" + to_string(reg_cnt) + " = ne %";
-                // koopa_str += to_string(leftreg) + ", 0\n";
-                // reg_cnt++;
-                int ans_l = res_l.second == 0 ? 0 : 1;
-                if (ans_l != 0)
+                if (res_l.second != 0)
+                {
                     return make_pair(true, 1);
-                // 右边不等于0？
-                koopa_str += "  %" + to_string(reg_cnt) + " = ne %";
-                koopa_str += to_string(rightreg) + ", 0\n";
-                reg_cnt++;
-                // 对两边结果取或
-                koopa_str += "  %" + to_string(reg_cnt) + " = or ";
-                koopa_str += to_string(ans_l) + ", %" + to_string(reg_cnt - 1) + "\n";
-                reg_cnt++;
-            }
-            else if (!res_l.first && res_r.first)
-            {
-                /* 逻辑或 */
-                // 右边不等于0？
-                // koopa_str += "%" + to_string(reg_cnt) + " = ne %";
-                // koopa_str += to_string(rightreg) + ", 0\n";
-                // reg_cnt++;
-                int ans_r = res_r.second == 0 ? 0 : 1;
-                if (ans_r != 0)
-                    return make_pair(true, 1);
-                // 左边不等于0？不等于则返回1
-                koopa_str += "  %" + to_string(reg_cnt) + " = ne %";
-                koopa_str += to_string(leftreg) + ", 0\n";
-                reg_cnt++;
-                // 对两边结果取或
-                // 好像不需要
-                koopa_str += "  %" + to_string(reg_cnt) + " = or ";
-                koopa_str += to_string(ans_r) + ", %" + to_string(reg_cnt - 1) + "\n";
-                reg_cnt++;
+                }
+                koopa_str += "  jump " + then_tag + "\n\n";
             }
             else
             {
-                /* 逻辑或 */
-                // 左边不等于0？不等于则返回1
-                koopa_str += "  %" + to_string(reg_cnt) + " = ne %";
-                koopa_str += to_string(leftreg) + ", 0\n";
-                reg_cnt++;
-                // 右边不等于0？
-                koopa_str += "  %" + to_string(reg_cnt) + " = ne %";
-                koopa_str += to_string(rightreg) + ", 0\n";
-                reg_cnt++;
-                // 对两边结果取或
-                koopa_str += "  %" + to_string(reg_cnt) + " = or %";
-                koopa_str += to_string(reg_cnt - 2) + ", %" + to_string(reg_cnt - 1) + "\n";
-                reg_cnt++;
+                koopa_str += "  br %" + to_string(leftreg) + ", " + end_tag + ", " + then_tag + "\n\n";
             }
+
+            koopa_str += then_tag + ":\n";
+
+            pair<bool, int> res_r = landexp->Koopa();
+            int rightreg = reg_cnt - 1;
+
+            if (res_r.first)
+            {
+                if (res_r.second != 0)
+                {
+                    koopa_str += "  jump " + end_tag + "\n\n";
+                }
+                else
+                {
+                    koopa_str += "  store 0, " + res_tag + "\n";
+                    koopa_str += "  jump " + end_tag + "\n\n";
+                }
+            }
+            else
+            {
+                koopa_str += "  %" + to_string(reg_cnt) + " = ne %" + to_string(rightreg) + ", 0\n";
+                reg_cnt++;
+                koopa_str += "  store %" + to_string(reg_cnt - 1) + ", " + res_tag + "\n";
+                koopa_str += "  jump " + end_tag + "\n\n";
+            }
+
+            koopa_str += end_tag + ":\n";
+
+            koopa_str += "  %" + to_string(reg_cnt) + " = load " + res_tag + "\n";
+            reg_cnt++;
+
             return make_pair(false, -1);
         }
-    }
-    int cal_value() const override
-    {
-        if (rule == 0)
-            return landexp->cal_value();
-        else
-            return lorexp->cal_value() || landexp->cal_value();
     }
 };
 
@@ -1549,10 +1396,6 @@ public:
     {
         return constexp->Koopa();
     }
-    int cal_value() const override
-    {
-        return constexp->cal_value();
-    }
 };
 
 // ConstExp 常量赋值表达式 Exp lv4
@@ -1569,10 +1412,6 @@ public:
     pair<bool, int> Koopa() const override
     {
         return exp->Koopa();
-    }
-    int cal_value() const override
-    {
-        return exp->cal_value();
     }
 };
 
@@ -1594,8 +1433,6 @@ public:
     }
     pair<bool, int> Koopa() const override
     {
-        if (re)
-            return make_pair(false, -1);
         if (rule == 0)
             return decl->Koopa();
         else
@@ -1733,22 +1570,4 @@ public:
     {
         return exp->Koopa();
     }
-    int cal_value() const override
-    {
-        return exp->cal_value();
-    }
 };
-
-// Number
-// class NumberAST : public BaseAST
-// {
-// public:
-//     int val;
-
-//     void Dump() const override
-//     {
-//         std::cout << "NumberAST { ";
-//         std::cout << val;
-//         std::cout << " }";
-//     }
-// };
