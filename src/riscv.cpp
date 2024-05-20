@@ -181,14 +181,14 @@ string load_to_reg(const koopa_raw_value_t &value, const string &reg)
         int stack_pos = get_stack_pos(value);
         if (stack_pos >= 2048 || stack_pos < -2048)
         {
-            cout << "  li, t3, " << stack_pos << "\n";
+            cout << "  li t3, " << stack_pos << "\n";
             cout << "  add t3, t3, sp\n";
             cout << "  lw " << reg << ", 0(t3)\n";
         }
         else
         {
             cout << "  lw " << reg << ", ";
-            cout << stack_pos << "(sp)" << "\n";
+            cout << stack_pos << "(sp)\n";
         }
         return reg;
     }
@@ -200,13 +200,13 @@ string load_to_reg(const koopa_raw_value_t &value, const string &reg)
 // binary指令
 void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
 {
+    string reg_l = load_to_reg(binary.lhs, "t0");
+    string reg_r = load_to_reg(binary.rhs, "t1");
     switch (binary.op)
     {
     case KOOPA_RBO_NOT_EQ:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  xor " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
         cout << "  snez " << reg_l << ", " << reg_l << "\n";
@@ -216,8 +216,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_EQ:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  xor " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
         cout << "  seqz " << reg_l << ", " << reg_l << "\n";
@@ -227,8 +225,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_GT:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  sgt " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
@@ -237,8 +233,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_LT:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  slt " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
@@ -247,8 +241,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_GE:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  slt " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
         cout << "  seqz " << reg_l << ", " << reg_l << "\n";
@@ -258,8 +250,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_LE:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  sgt " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
         cout << "  seqz " << reg_l << ", " << reg_l << "\n";
@@ -269,8 +259,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_ADD:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  add " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
@@ -279,9 +267,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_SUB:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
-
         cout << "  sub " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
         break;
@@ -289,8 +274,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_MUL:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  mul " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
@@ -299,8 +282,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_DIV:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  div " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
@@ -309,8 +290,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_MOD:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
         cout << "  rem " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
         break;
@@ -318,8 +297,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_AND:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  and " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
@@ -328,8 +305,6 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     case KOOPA_RBO_OR:
     {
         // 默认使用t0,t1
-        string reg_l = load_to_reg(binary.lhs, "t0");
-        string reg_r = load_to_reg(binary.rhs, "t1");
 
         cout << "  or " << reg_l << ", " << reg_l << ", " << reg_r << "\n";
 
