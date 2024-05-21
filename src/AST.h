@@ -19,6 +19,11 @@ static int logical;
 static vector<bool> block_end;
 static unordered_map<int, int> block_parent;
 
+// lv7 while
+static int loop_cnt;
+static int loop_dep;
+static unordered_map<int, int> find_loop;
+
 static bool if_end = true;
 
 extern SymbolList symbol_list;
@@ -170,30 +175,9 @@ public:
             i->Koopa();
         }
 
-        // koopa_str += "\n";
-        // koopa_str += "/////////////Block" + to_string(block_now) + ": block_end = ";
-        // if (block_end[block_now])
-        // {
-        //     koopa_str += "true/////////////\n\n";
-        // }
-        // else
-        // {
-        //     koopa_str += "false////////////\n\n";
-        // }
-
         // 处理if{}的情况
         if (parent_block != 0)
             block_end[parent_block] = block_end[block_now];
-
-        // koopa_str += "/////////////Block" + to_string(parent_block) + ": block_end = ";
-        // if (block_end[parent_block])
-        // {
-        //     koopa_str += "true/////////////\n\n";
-        // }
-        // else
-        // {
-        //     koopa_str += "false////////////\n\n";
-        // }
 
         // 子块完成后，归位block_last
         block_now = block_parent[block_now];
@@ -364,11 +348,12 @@ public:
 
             end_tag = "%end_" + to_string(now_if_cnt);
 
-            if (!block_end[block_now])
+            if (!else_stmt_end)
             {
                 // cout << end_tag << " jump at line 358" << endl;
                 koopa_str += "  jump " + end_tag + "\n\n";
             }
+
             if (if_stmt_end && else_stmt_end)
             {
                 block_end[block_now] = true;
@@ -438,15 +423,109 @@ public:
 
         if (!block_end[block_now])
         {
-            // koopa_str += "Jump: block_last = " + to_string(block_last) + "\n";
-            // koopa_str += "Jump: block_now = " + to_string(block_now) + "\n";
-            // koopa_str += "Jump: Block" + to_string(block_now) + "\n";
-            // cout << end_tag << " jump at line 435" << endl;
             koopa_str += "  jump " + end_tag + "\n";
         }
         koopa_str += "\n";
         // end of if branch
         // koopa_str += end_tag + ":\n";
+
+        return make_pair(false, -1);
+    }
+};
+
+// lv7
+// While ::= WHILE (Exp) Stmt
+// While循环
+class WhileAST : public BaseAST
+{
+public:
+    unique_ptr<BaseAST> exp;
+    unique_ptr<BaseAST> stmt;
+    void Dump() const override
+    {
+        cout << "WhilesStmt { ";
+        exp->Dump();
+        stmt->Dump();
+        cout << " }";
+    }
+    pair<bool, int> Koopa() const override
+    {
+        loop_cnt++;
+        loop_dep++;
+        find_loop[loop_dep] = loop_cnt;
+
+        string entry_name = "%while_entry_" + to_string(loop_cnt);
+        string body_name = "%while_body_" + to_string(loop_cnt);
+        string end_name = "%while_end_" + to_string(loop_cnt);
+
+        koopa_str += "  jump " + entry_name + "\n\n";
+        koopa_str += entry_name + ":\n";
+
+        pair<bool, int> res = exp->Koopa();
+        if (res.first)
+        {
+            koopa_str += "  br " + to_string(res.second) + ", " + body_name + ", " + end_name + "\n\n";
+        }
+        else
+        {
+            koopa_str += "  br %" + to_string(reg_cnt - 1) + ", " + body_name + ", " + end_name + "\n\n";
+        }
+
+        koopa_str += body_name + ":\n";
+
+        stmt->Koopa();
+        if (!block_end[block_now])
+        {
+            koopa_str += "  jump " + entry_name + "\n\n";
+        }
+
+        koopa_str += end_name + ":\n";
+
+        loop_dep--;
+
+        block_end[block_now] = false;
+
+        return make_pair(false, -1);
+    }
+};
+
+// lv7
+// BREAK/CONTINUE
+// break: rule -> 0
+// continue: rule -> 1
+class LoopJumpAST : public BaseAST
+{
+public:
+    int rule;
+    void Dump() const override
+    {
+        if (rule == 0)
+        {
+            cout << "break";
+        }
+        else
+        {
+            cout << "continue";
+        }
+    }
+    pair<bool, int> Koopa() const override
+    {
+        int tag = find_loop[loop_dep];
+        // break: 跳转到%while_end
+        if (rule == 0)
+        {
+            string end_name = "%while_end_" + to_string(tag);
+            if (!block_end[block_now])
+                koopa_str += "  jump " + end_name + "\n\n";
+            block_end[block_now] = true;
+        }
+        else
+        {
+            string entry_name = "%while_entry_" + to_string(tag);
+            if (!block_end[block_now])
+                koopa_str += "  jump " + entry_name + "\n\n";
+            block_end[block_now] = true;
+        }
 
         return make_pair(false, -1);
     }
