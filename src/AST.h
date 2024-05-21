@@ -98,6 +98,11 @@ public:
 
         block->Koopa();
 
+        if (!block_end[block_now])
+        {
+            koopa_str += "  ret 0\n";
+        }
+
         koopa_str += "}";
         return make_pair(false, -1);
     }
@@ -176,8 +181,8 @@ public:
         }
 
         // 处理if{}的情况
-        if (parent_block != 0)
-            block_end[parent_block] = block_end[block_now];
+        // if (parent_block != 0)
+        block_end[parent_block] = block_end[block_now];
 
         // 子块完成后，归位block_last
         block_now = block_parent[block_now];
@@ -270,16 +275,16 @@ public:
                 pair<bool, int> res = exp->Koopa();
                 if (res.first)
                 {
-                    koopa_str += "  ret " + to_string(res.second) + "\n";
+                    koopa_str += "  ret " + to_string(res.second) + "\n\n";
                 }
                 else
                 {
-                    koopa_str += "  ret %" + to_string(reg_cnt - 1) + "\n";
+                    koopa_str += "  ret %" + to_string(reg_cnt - 1) + "\n\n";
                 }
             }
             else
             { //?
-                koopa_str += "  ret\n";
+                koopa_str += "  ret\n\n";
             }
             // koopa_str += "Ret: Block" + to_string(block_now) + "\n";
             block_end[block_now] = true;
@@ -481,8 +486,8 @@ public:
             koopa_str += "  jump " + entry_name + "\n\n";
         }
 
-        koopa_str += body_name + "_:\n";
-        koopa_str += "  jump " + entry_name + "\n\n";
+        // koopa_str += body_name + "_:\n";
+        // koopa_str += "  jump " + entry_name + "\n\n";
 
         koopa_str += end_name + ":\n";
 
