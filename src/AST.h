@@ -481,6 +481,9 @@ public:
             koopa_str += "  jump " + entry_name + "\n\n";
         }
 
+        koopa_str += body_name + "_:\n";
+        koopa_str += "  jump " + entry_name + "\n\n";
+
         koopa_str += end_name + ":\n";
 
         loop_dep--;
