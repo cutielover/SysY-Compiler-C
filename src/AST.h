@@ -343,6 +343,8 @@ public:
             // else tag:
             koopa_str += else_tag + ":\n";
 
+            block_end[block_now] = false;
+
             else_stmt->Koopa();
             bool else_stmt_end = block_end[block_now];
 
@@ -423,9 +425,8 @@ public:
 
         if (!block_end[block_now])
         {
-            koopa_str += "  jump " + end_tag + "\n";
+            koopa_str += "  jump " + end_tag + "\n\n";
         }
-        koopa_str += "\n";
         // end of if branch
         // koopa_str += end_tag + ":\n";
 
@@ -474,6 +475,7 @@ public:
         koopa_str += body_name + ":\n";
 
         stmt->Koopa();
+
         if (!block_end[block_now])
         {
             koopa_str += "  jump " + entry_name + "\n\n";
@@ -510,6 +512,8 @@ public:
     }
     pair<bool, int> Koopa() const override
     {
+        // if (loop_dep < 1)
+        //     assert(false);
         int tag = find_loop[loop_dep];
         // break: 跳转到%while_end
         if (rule == 0)
