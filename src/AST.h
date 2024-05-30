@@ -4,7 +4,9 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <deque>
 #include <unordered_map>
+#include "assert.h"
 #include "symbol.h"
 using namespace std;
 
@@ -26,6 +28,13 @@ static unordered_map<int, int> find_loop;
 
 static bool if_end = true;
 
+// lv8 function
+static bool param_block = false;
+static vector<string> function_params;
+
+// lv8 global var
+static bool is_global = true;
+
 extern SymbolList symbol_list;
 
 // lv4+
@@ -41,7 +50,8 @@ public:
     // bool: true-能计算 false-不能
     // int: 能计算出的值；对于不能计算出的值，返回-1
     virtual pair<bool, int> Koopa() const { return make_pair(false, -1); }
-    virtual string name() const { return "oops"; };
+    virtual string name() const { return "oops"; }
+    virtual int calc() const { return 0; }
 };
 
 // lv4+
@@ -50,18 +60,60 @@ class CompUnitAST : public BaseAST
 {
 public:
     // 用智能指针管理对象
-    unique_ptr<BaseAST> func_def;
+    unique_ptr<deque<unique_ptr<BaseAST>>> DefList;
+    int func_num;
+    // vector<unique_ptr<BaseAST>> DeclList;
+    // vector<unique_ptr<BaseAST>> FuncList;
 
     void Dump() const override
     {
         cout << "CompUnitAST { ";
-        func_def->Dump();
+        for (const auto &i : *DefList)
+        {
+            i->Dump();
+            cout << ", ";
+        }
         cout << " }";
     }
 
     pair<bool, int> Koopa() const override
     {
-        func_def->Koopa();
+        symbol_list.newMap();
+
+        koopa_str += "decl @getint(): i32\ndecl @getch() : i32\ndecl @getarray(*i32) : i32\n";
+        koopa_str += "decl @putint(i32)\ndecl @putch(i32)\ndecl @putarray(i32, *i32)\n";
+        koopa_str += "decl @starttime()\ndecl @stoptime()\n\n\n";
+
+        symbol_list.addSymbol("getint", Value(FUNC, 1, 0));
+        symbol_list.addSymbol("getch", Value(FUNC, 1, 0));
+        symbol_list.addSymbol("getarray", Value(FUNC, 1, 0));
+        symbol_list.addSymbol("putint", Value(FUNC, 0, 0));
+        symbol_list.addSymbol("putch", Value(FUNC, 0, 0));
+        symbol_list.addSymbol("putarray", Value(FUNC, 0, 0));
+        symbol_list.addSymbol("starttime", Value(FUNC, 0, 0));
+        symbol_list.addSymbol("stoptime", Value(FUNC, 0, 0));
+
+        int n = (*DefList).size();
+        for (int i = 0; i < n - func_num; i++)
+        {
+            // is_global = true;
+            if (n == func_num)
+                break;
+            ((*DefList)[i])->Koopa();
+            // is_global = false;
+            koopa_str += "\n";
+        }
+
+        for (int i = n - 1; i >= n - func_num; i--)
+        {
+            // is_global = true;
+            ((*DefList)[i])->Koopa();
+            // is_global = false;
+        }
+
+        // if (n >= 1)
+        //     ((*DefList)[n - 1])->Koopa();
+
         return make_pair(false, -1);
     }
 };
@@ -71,14 +123,14 @@ public:
 class FuncDefAST : public BaseAST
 {
 public:
-    unique_ptr<BaseAST> func_type;
+    string type;
     string ident;
     unique_ptr<BaseAST> block;
 
     void Dump() const override
     {
         cout << "FuncDefAST { ";
-        func_type->Dump();
+        cout << type;
         cout << ", " << ident << ", ";
         block->Dump();
         cout << " }";
@@ -86,12 +138,32 @@ public:
 
     pair<bool, int> Koopa() const override
     {
+        is_global = false;
+        int val_func = 0;
+        if (type == "int")
+        {
+            val_func = 1;
+        }
+        Value global_func = Value(FUNC, val_func, 0);
+        symbol_list.addSymbol(ident, global_func);
+
         koopa_str += "fun ";
         koopa_str += "@";
         koopa_str += ident;
-        koopa_str += "(): ";
+        koopa_str += "()";
 
-        func_type->Koopa();
+        if (type == "int")
+        {
+            koopa_str += ": i32 ";
+        }
+        else if (type == "void")
+        {
+            koopa_str += " ";
+        }
+
+        // func_type->Koopa();
+
+        reg_cnt = 0;
 
         koopa_str += "{\n";
         koopa_str += "\%entry:\n";
@@ -100,41 +172,247 @@ public:
 
         if (!block_end[block_now])
         {
-            koopa_str += "  ret 0\n";
+            if (type == "int")
+                koopa_str += "  ret 0\n";
+            else
+            {
+                koopa_str += "  ret\n";
+            }
         }
 
-        koopa_str += "}";
+        koopa_str += "}\n\n";
         return make_pair(false, -1);
     }
 };
 
-// lv4+
-// FuncType
-class FuncTypeAST : public BaseAST
+// lv8
+// FuncDef with Params
+// FuncDef ::= FuncType IDENT '(' FuncFParams ')' Block
+// @
+class FuncDefWithParamsAST : public BaseAST
 {
 public:
     string type;
+    string ident;
+    unique_ptr<BaseAST> funcfparams;
+    unique_ptr<BaseAST> block;
 
     void Dump() const override
     {
-        cout << "FuncTypeAST { ";
+        cout << "FuncDefWithParamsAST { ";
         cout << type;
+        cout << ", " << ident << ", ";
+        cout << " ( ";
+        funcfparams->Dump();
+        cout << " ) ";
+        block->Dump();
         cout << " }";
     }
 
     pair<bool, int> Koopa() const override
     {
+        is_global = false;
+        int val_func = 0;
         if (type == "int")
         {
-            koopa_str += "i32 ";
+            val_func = 1;
         }
-        else
+        Value global_func = Value(FUNC, val_func, 0);
+        symbol_list.addSymbol(ident, global_func);
+
+        koopa_str += "fun ";
+        koopa_str += "@";
+        koopa_str += ident;
+
+        koopa_str += "(";
+
+        param_block = false;
+        funcfparams->Koopa();
+
+        koopa_str += ")";
+
+        // func_type->Koopa();
+
+        if (type == "int")
         {
-            koopa_str += "i32 ";
+            koopa_str += ": i32 ";
+        }
+        else if (type == "void")
+        {
+            koopa_str += " ";
+        }
+
+        reg_cnt = 0;
+        koopa_str += "{\n";
+        koopa_str += "\%entry:\n";
+
+        param_block = true;
+        funcfparams->Koopa();
+
+        block->Koopa();
+
+        if (!block_end[block_now])
+        {
+            if (type == "int")
+                koopa_str += "  ret 0\n";
+            else
+            {
+                koopa_str += "  ret\n";
+            }
+        }
+
+        koopa_str += "}\n\n";
+        return make_pair(false, -1);
+    }
+};
+
+// lv8
+// not finish
+// FuncFParams
+class FuncFParamsAST : public BaseAST
+{
+public:
+    vector<unique_ptr<BaseAST>> ParamList;
+    void Dump() const override
+    {
+        cout << "FuncFParamsAST { ";
+        for (auto &i : ParamList)
+        {
+            i->Dump();
+            cout << ", ";
+        }
+        cout << " }";
+    }
+    pair<bool, int> Koopa() const override
+    {
+        bool params = false;
+        for (auto &i : ParamList)
+        {
+            if (params && !param_block)
+            {
+                koopa_str += ", ";
+            }
+            i->Koopa();
+            params = true;
         }
         return make_pair(false, -1);
     }
 };
+
+// lv8
+// not finish
+// FuncFParam
+// INT IDENT
+class FuncFParamAST : public BaseAST
+{
+public:
+    string type;
+    string name_;
+    void Dump() const override
+    {
+        cout << "FuncFParamAST { ";
+        cout << type << ": @" << name_;
+        cout << " }";
+    }
+    pair<bool, int> Koopa() const override
+    {
+        // 声明参数
+        if (!param_block)
+        {
+            if (type == "int")
+            {
+                string param_tag = "@" + name_ + "_" + to_string(block_cnt + 1) + "_param";
+                koopa_str += param_tag + ": i32";
+            }
+        }
+        // 函数体内 为参数分配内存空间
+        else
+        {
+            if (type == "int")
+            {
+                string param_tag = "@" + name_ + "_" + to_string(block_cnt + 1) + "_param";
+                string use_tag = "@" + name_ + "_" + to_string(block_cnt + 1);
+                koopa_str += "  " + use_tag + " = alloc i32\n";
+                koopa_str += "  store " + param_tag + ", " + use_tag + "\n";
+                function_params.emplace_back(name_);
+            }
+        }
+        return make_pair(false, -1);
+    }
+
+    string name() const override
+    {
+        return name_;
+    }
+};
+
+// lv8
+// FuncRParams
+class FuncRParamsAST : public BaseAST
+{
+public:
+    vector<unique_ptr<BaseAST>> ParamList;
+    void Dump() const override
+    {
+        cout << "FuncRParamsAST { ";
+        for (auto &i : ParamList)
+        {
+            i->Dump();
+        }
+        cout << " }";
+    }
+    pair<bool, int> Koopa() const override
+    {
+        return make_pair(false, -1);
+    }
+    vector<pair<bool, int>> get_params()
+    {
+        vector<pair<bool, int>> rparams;
+        for (auto &i : ParamList)
+        {
+            auto res = i->Koopa();
+            if (res.first)
+            {
+                rparams.push_back(res);
+            }
+            else
+            {
+                rparams.push_back(make_pair(false, reg_cnt - 1));
+            }
+        }
+        return rparams;
+    }
+};
+
+// lv4+
+// FuncType
+// class FuncTypeAST : public BaseAST
+// {
+// public:
+//     string type;
+
+//     void Dump() const override
+//     {
+//         cout << "FuncTypeAST { ";
+//         cout << type;
+//         cout << " }";
+//     }
+
+//     pair<bool, int> Koopa() const override
+//     {
+//         if (type == "int")
+//         {
+//             is_void = false;
+//             koopa_str += ": i32 ";
+//         }
+//         else if (type == "void")
+//         {
+//             is_void = true;
+//             koopa_str += " ";
+//         }
+//         return make_pair(false, -1);
+//     }
+// };
 
 // lv4+
 // Block lv4
@@ -149,7 +427,7 @@ public:
         for (auto &i : blockItemList)
         {
             i->Dump();
-            cout << ",";
+            cout << ", ";
         }
         cout << " }";
     }
@@ -168,6 +446,14 @@ public:
         // 修改：将当前块正式修改为block_cnt
         // 记录：设置当前块为未完结的
         block_end.push_back(false);
+
+        for (int i = 0; i < function_params.size(); i++)
+        {
+            Value param = Value(VAR, 0, block_now);
+            symbol_list.addSymbol(function_params[i], param);
+        }
+
+        function_params.clear();
 
         for (auto &i : blockItemList)
         {
@@ -275,16 +561,16 @@ public:
                 pair<bool, int> res = exp->Koopa();
                 if (res.first)
                 {
-                    koopa_str += "  ret " + to_string(res.second) + "\n\n";
+                    koopa_str += "  ret " + to_string(res.second) + "\n";
                 }
                 else
                 {
-                    koopa_str += "  ret %" + to_string(reg_cnt - 1) + "\n\n";
+                    koopa_str += "  ret %" + to_string(reg_cnt - 1) + "\n";
                 }
             }
             else
             { //?
-                koopa_str += "  ret\n\n";
+                koopa_str += "  ret\n";
             }
             // koopa_str += "Ret: Block" + to_string(block_now) + "\n";
             block_end[block_now] = true;
@@ -559,6 +845,10 @@ public:
     {
         return lorexp->Koopa();
     }
+    int calc() const override
+    {
+        return lorexp->calc();
+    }
 };
 
 // lv4+
@@ -600,6 +890,21 @@ public:
         else
         {
             return lval->Koopa();
+        }
+    }
+    int calc() const override
+    {
+        if (rule == 0)
+        {
+            return exp->calc();
+        }
+        else if (rule == 1)
+        {
+            return number;
+        }
+        else
+        {
+            return lval->calc();
         }
     }
 };
@@ -677,6 +982,96 @@ public:
             }
             return make_pair(false, -1);
         }
+    }
+    int calc() const override
+    {
+        if (rule == 0)
+        {
+            return primaryexp->calc();
+        }
+        else
+        {
+            if (op == "!")
+            {
+                return !unaryexp->calc();
+            }
+            else if (op == "-")
+            {
+                return -unaryexp->calc();
+            }
+            else
+            {
+                return unaryexp->calc();
+            }
+        }
+    }
+};
+
+// LV8
+// UnaryExp -> IDENT "(" [FuncRParams] ")"
+class UnaryExpWithFuncAST : public BaseAST
+{
+public:
+    string ident;
+    unique_ptr<BaseAST> funcrparams;
+    void Dump() const override
+    {
+        cout << "UnaryExpWithFuncAST { ";
+        cout << "{call " << ident << "} ";
+        if (funcrparams)
+        {
+            funcrparams->Dump();
+        }
+        cout << " }";
+    }
+    pair<bool, int> Koopa() const override
+    {
+        Value func = symbol_list.getSymbol(ident);
+        if (func.type != TYPE::FUNC)
+        {
+            // cout << func.type << endl;
+            // assert(false); //??
+        }
+        vector<pair<bool, int>> rparams_now;
+        if (funcrparams)
+        {
+            rparams_now = (dynamic_cast<FuncRParamsAST *>(funcrparams.get()))->get_params();
+        }
+        // int
+        if (func.val == 1)
+        {
+            koopa_str += "  %" + to_string(reg_cnt) + " = call @" + ident;
+            reg_cnt++;
+        }
+        // void
+        else
+        {
+            koopa_str += "  call @" + ident;
+        }
+        koopa_str += "(";
+
+        if (funcrparams)
+        {
+            for (int i = 0; i < rparams_now.size(); i++)
+            {
+                if (i != 0)
+                {
+                    koopa_str += ", ";
+                }
+                if (rparams_now[i].first)
+                {
+                    koopa_str += to_string(rparams_now[i].second);
+                }
+                else
+                {
+                    koopa_str += "%" + to_string(rparams_now[i].second);
+                }
+            }
+        }
+
+        koopa_str += ")\n";
+
+        return make_pair(false, -1);
     }
 };
 
@@ -810,6 +1205,28 @@ public:
             return make_pair(false, -1);
         }
     }
+    int calc() const override
+    {
+        if (rule == 0)
+        {
+            return unaryexp->calc();
+        }
+        else
+        {
+            if (op == "*")
+            {
+                return mulexp->calc() * unaryexp->calc();
+            }
+            else if (op == "/")
+            {
+                return mulexp->calc() / unaryexp->calc();
+            }
+            else
+            {
+                return mulexp->calc() % unaryexp->calc();
+            }
+        }
+    }
 };
 
 // lv4+
@@ -913,6 +1330,24 @@ public:
             }
 
             return make_pair(false, -1);
+        }
+    }
+    int calc() const override
+    {
+        if (rule == 0)
+        {
+            return mulexp->calc();
+        }
+        else
+        {
+            if (op == "+")
+            {
+                return addexp->calc() + mulexp->calc();
+            }
+            else
+            {
+                return addexp->calc() - mulexp->calc();
+            }
         }
     }
 };
@@ -1073,6 +1508,32 @@ public:
             return make_pair(false, -1);
         }
     }
+    int calc() const override
+    {
+        if (rule == 0)
+        {
+            return addexp->calc();
+        }
+        else
+        {
+            if (op == ">")
+            {
+                return relexp->calc() > addexp->calc();
+            }
+            else if (op == "<")
+            {
+                return relexp->calc() < addexp->calc();
+            }
+            else if (op == ">=")
+            {
+                return relexp->calc() >= addexp->calc();
+            }
+            else
+            {
+                return relexp->calc() <= addexp->calc();
+            }
+        }
+    }
 };
 
 // lv4+
@@ -1181,6 +1642,24 @@ public:
             return make_pair(false, -1);
         }
     }
+    int calc() const override
+    {
+        if (rule == 0)
+        {
+            return relexp->calc();
+        }
+        else
+        {
+            if (op == "==")
+            {
+                return eqexp->calc() == relexp->calc();
+            }
+            else
+            {
+                return eqexp->calc() != relexp->calc();
+            }
+        }
+    }
 };
 
 // lv6.2短路求值
@@ -1283,6 +1762,17 @@ public:
             return make_pair(false, -1);
         }
     }
+    int calc() const override
+    {
+        if (rule == 0)
+        {
+            return eqexp->calc();
+        }
+        else
+        {
+            return landexp->calc() && eqexp->calc();
+        }
+    }
 };
 
 // lv6.2短路求值
@@ -1375,6 +1865,17 @@ public:
             reg_cnt++;
 
             return make_pair(false, -1);
+        }
+    }
+    int calc() const override
+    {
+        if (rule == 0)
+        {
+            return landexp->calc();
+        }
+        else
+        {
+            return lorexp->calc() || landexp->calc();
         }
     }
 };
@@ -1559,6 +2060,11 @@ public:
             return make_pair(false, -1);
         }
     }
+    int calc() const override
+    {
+        Value cur_var = symbol_list.getSymbol(ident);
+        return cur_var.val;
+    }
 };
 
 // VarDecl 声明变量，需要列表 BType VarDef {"," VarDef} ";" lv4
@@ -1607,38 +2113,68 @@ public:
     }
     pair<bool, int> Koopa() const override
     {
-        if (rule == 0)
+        // 全局变量koopa
+        if (is_global)
         {
-            // var_type[ident] = VAR;
-            Value tmp(VAR, 0, block_now);
+            if (rule == 0)
+            {
+                Value tmp(VAR, 0, block_now);
 
-            string name = ident + "_" + to_string(block_now);
+                string name = ident + "_" + to_string(block_now);
 
-            symbol_list.addSymbol(ident, tmp);
+                symbol_list.addSymbol(ident, tmp);
 
-            koopa_str += "  @" + name + " = alloc i32 " + "\n";
+                koopa_str += "global @" + name + " = alloc i32, zeroinit\n";
+            }
+            else
+            {
+                int var_init = initval->calc();
+
+                Value tmp(VAR, var_init, block_now);
+
+                string name = ident + "_" + to_string(block_now);
+
+                symbol_list.addSymbol(ident, tmp);
+
+                koopa_str += "global @" + name + " = alloc i32, " + to_string(var_init) + "\n";
+            }
             return make_pair(false, -1);
         }
         else
         {
-            // var_type[ident] = VAR;
-            // var_val[ident] = initval->cal_value();
-            int val = (initval->Koopa()).second;
-            Value tmp(VAR, val, block_now);
-
-            string name = ident + "_" + to_string(block_now);
-
-            symbol_list.addSymbol(ident, tmp);
-
-            koopa_str += "  @" + name + " = alloc i32 " + "\n";
-            pair<bool, int> res = initval->Koopa();
-            if (res.first)
+            if (rule == 0)
             {
-                koopa_str += "  store " + to_string(res.second) + ", @" + name + "\n";
+                // var_type[ident] = VAR;
+                Value tmp(VAR, 0, block_now);
+
+                string name = ident + "_" + to_string(block_now);
+
+                symbol_list.addSymbol(ident, tmp);
+
+                koopa_str += "  @" + name + " = alloc i32 " + "\n";
             }
             else
             {
-                koopa_str += "  store %" + to_string(reg_cnt - 1) + ", @" + name + "\n";
+                // var_type[ident] = VAR;
+                // var_val[ident] = initval->cal_value();
+                // int val = (initval->Koopa()).second;
+
+                string name = ident + "_" + to_string(block_now);
+
+                koopa_str += "  @" + name + " = alloc i32 " + "\n";
+                pair<bool, int> res = initval->Koopa();
+                if (res.first)
+                {
+                    koopa_str += "  store " + to_string(res.second) + ", @" + name + "\n";
+                    Value tmp(VAR, res.second, block_now);
+                    symbol_list.addSymbol(ident, tmp);
+                }
+                else
+                {
+                    koopa_str += "  store %" + to_string(reg_cnt - 1) + ", @" + name + "\n";
+                    Value tmp(VAR, 0, block_now);
+                    symbol_list.addSymbol(ident, tmp);
+                }
             }
             return make_pair(false, -1);
         }
@@ -1660,5 +2196,9 @@ public:
     pair<bool, int> Koopa() const override
     {
         return exp->Koopa();
+    }
+    int calc() const override
+    {
+        return exp->calc();
     }
 };

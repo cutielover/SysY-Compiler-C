@@ -11,12 +11,14 @@
 #include <string>
 #include <cstring>
 #include <vector>
+#include <deque>
 #include "AST.h"
 
 // 声明 lexer 函数和错误处理函数
 int yylex();
 void yyerror(std::unique_ptr<BaseAST> &ast, const char *s);
 
+int funcnum = 0;
 
 using namespace std;
 
@@ -36,6 +38,7 @@ using namespace std;
   std::string *str_val;
   int int_val;
   BaseAST *ast_val;
+  deque<unique_ptr<BaseAST>> *ast_deq;
 }
 
 // lexer 返回的所有 token 种类的声明
@@ -43,13 +46,15 @@ using namespace std;
 %token INT RETURN CONST IF ELSE LE GE EQ NE AND OR WHILE BREAK CONTINUE
 %token <str_val> IDENT
 %token <int_val> INT_CONST
+%token VOID
 
 // 非终结符的类型定义
-%type <ast_val> FuncDef FuncType Block Stmt If
+%type <ast_val> FuncDef Block Stmt If
 %type <ast_val> Exp PrimaryExp UnaryExp AddExp MulExp LOrExp LAndExp EqExp RelExp
 %type <ast_val> Decl ConstDecl BType ConstDef ConstDefList ConstInitVal BlockItem LVal ConstExp LeVal BlockItemList VarDecl VarDef InitVar VarDefList
 %type <int_val> Number
-
+%type <ast_deq> DefList
+%type <ast_val> FuncFParams FuncFParam FuncRParams
 %%
 
 // 开始符, CompUnit ::= FuncDef, 大括号后声明了解析完成后 parser 要做的事情
@@ -58,10 +63,41 @@ using namespace std;
 // 此时我们应该把 FuncDef 返回的结果收集起来, 作为 AST 传给调用 parser 的函数
 // $1 指代规则里第一个符号的返回值, 也就是 FuncDef 的返回值
 CompUnit
-  : FuncDef {
+  : DefList {
     auto comp_unit = make_unique<CompUnitAST>();
-    comp_unit->func_def = unique_ptr<BaseAST>($1);
+    comp_unit->DefList = unique_ptr<deque<unique_ptr<BaseAST>>>($1);
+    comp_unit->func_num = funcnum;
     ast = move(comp_unit);
+  }
+  ;
+
+
+DefList
+  : FuncDef DefList {
+    auto deq = (deque<unique_ptr<BaseAST>>*)($2);
+    auto func = unique_ptr<BaseAST>($1);
+    deq->push_back(move(func));
+    funcnum++;
+    $$ = deq;
+  }
+  | Decl DefList {
+    auto deq = (deque<unique_ptr<BaseAST>>*)($2);
+    auto decl = unique_ptr<BaseAST>($1);
+    deq->push_front(move(decl));
+    $$ = deq;
+  }
+  | FuncDef {
+    auto deq = new deque<unique_ptr<BaseAST>>();
+    auto func = unique_ptr<BaseAST>($1);
+    deq->push_back(move(func));
+    funcnum++;
+    $$ = deq;
+  }
+  | Decl {
+    auto deq = new deque<unique_ptr<BaseAST>>();
+    auto decl = unique_ptr<BaseAST>($1);
+    deq->push_front(move(decl));
+    $$ = deq;
   }
   ;
 
@@ -76,23 +112,94 @@ CompUnit
 // 虽然此处你看不出用 unique_ptr 和手动 delete 的区别, 但当我们定义了 AST 之后
 // 这种写法会省下很多内存管理的负担
 FuncDef
-  : FuncType IDENT '(' ')' Block {
+  : INT IDENT '(' ')' Block {
     auto ast = new FuncDefAST();
-    ast->func_type = unique_ptr<BaseAST>($1);
+    ast->type = "int";
     ast->ident = *unique_ptr<string>($2);
     ast->block = unique_ptr<BaseAST>($5);
     $$ = ast;
   }
+  | VOID IDENT '(' ')' Block {
+    auto ast = new FuncDefAST();
+    ast->type = "void";
+    ast->ident = *unique_ptr<string>($2);
+    ast->block = unique_ptr<BaseAST>($5);
+    $$ = ast;
+  }
+  | INT IDENT '(' FuncFParams ')' Block {
+    auto ast = new FuncDefWithParamsAST();
+    ast->type = "int";
+    ast->ident = *unique_ptr<string>($2);
+    ast->funcfparams = unique_ptr<BaseAST>($4);
+    ast->block = unique_ptr<BaseAST>($6);
+    $$ = ast;
+  }
+  | VOID IDENT '(' FuncFParams ')' Block {
+    auto ast = new FuncDefWithParamsAST();
+    ast->type = "void";
+    ast->ident = *unique_ptr<string>($2);
+    ast->funcfparams = unique_ptr<BaseAST>($4);
+    ast->block = unique_ptr<BaseAST>($6);
+    $$ = ast;
+  }
   ;
 
-// 同上, 不再解释
+FuncFParams
+  : FuncFParam ',' FuncFParams {
+    auto ast = new FuncFParamsAST();
+    auto ast_params = unique_ptr<FuncFParamsAST>((FuncFParamsAST*)$3);
+    ast->ParamList.emplace_back($1); 
+    for(auto &i : ast_params->ParamList) {
+      ast->ParamList.emplace_back(i.release());
+    }
+    $$ = ast;
+  }
+  | FuncFParam {
+    auto ast = new FuncFParamsAST();
+    ast->ParamList.emplace_back($1);
+    $$ = ast;
+  }
+  ;
+
+FuncFParam
+  : INT IDENT {
+    auto ast = new FuncFParamAST();
+    ast->type = "int";
+    ast->name_ = *unique_ptr<string>($2);
+    $$ = ast;
+  }
+  ;
+  
+FuncRParams
+  : Exp ',' FuncRParams {
+    auto ast = new FuncRParamsAST();
+    auto ast_params = unique_ptr<FuncRParamsAST>((FuncRParamsAST*)$3);
+    ast->ParamList.emplace_back($1);
+    for (auto &i : ast_params->ParamList){
+      ast->ParamList.emplace_back(i.release());
+    }
+    $$ = ast;
+  }
+  | Exp {
+    auto ast = new FuncRParamsAST();
+    ast->ParamList.emplace_back($1);
+    $$ = ast;
+  }
+  ;
+
+/* // 同上, 不再解释
 FuncType
   : INT {
     auto ast = new FuncTypeAST();
     ast->type = "int";
     $$ = ast;
   }
-  ;
+  | VOID {
+    auto ast = new FuncTypeAST();
+    ast->type = "void";
+    $$ = ast;
+  }
+  ; */
 
 Block
   : '{' BlockItemList '}' {
@@ -270,6 +377,17 @@ UnaryExp
     ast -> unaryexp = unique_ptr<BaseAST>($2);
     $$ = ast;
   }
+  | IDENT '(' ')' {
+    auto ast = new UnaryExpWithFuncAST();
+    ast->ident = *unique_ptr<string>($1);
+    $$ = ast;
+  }
+  | IDENT '(' FuncRParams ')' {
+    auto ast = new UnaryExpWithFuncAST();
+    ast->ident = *unique_ptr<string>($1);
+    ast->funcrparams = unique_ptr<BaseAST>($3);
+    $$ = ast;
+  }
   ;
 
 MulExp
@@ -436,15 +554,15 @@ Decl
     $$ = ast;
   }
   | VarDecl{
-      auto ast = new DeclAST();
-      ast->rule = 1;
-      ast->vardecl = unique_ptr<BaseAST>($1);
-      $$ = ast;
+    auto ast = new DeclAST();
+    ast->rule = 1;
+    ast->vardecl = unique_ptr<BaseAST>($1);
+    $$ = ast;
   }
   ;
 
 ConstDecl
-  : CONST BType ConstDefList ';' {
+  : CONST INT ConstDefList ';' {
     auto ast = $3;
     $$ = ast;
   }
@@ -515,7 +633,7 @@ LeVal
   ;
 
 VarDecl
-  : BType VarDefList ';' {
+  : INT VarDefList ';' {
     $$ = $2;
   }
   ;

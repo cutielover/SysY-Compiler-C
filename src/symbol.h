@@ -1,4 +1,6 @@
 #pragma once
+
+#include <iostream>
 #include <unordered_map>
 #include <vector>
 #include <string>
@@ -12,10 +14,12 @@ using namespace std;
 enum TYPE
 {
     CONSTANT,
-    VAR
+    VAR,
+    FUNC
 };
 
 // 符号对应的值
+// 对FUNC类型，void : val = 0 ; int : val = 1
 struct Value
 {
     TYPE type;
