@@ -217,7 +217,19 @@ string load_to_reg(const koopa_raw_value_t &value, const string &reg)
         // 栈上的参数
         else
         {
-            cout << "  lw " << reg << ", " << to_string(sp_size + 4 * (idx - 8)) << "(sp)\n";
+            int stack_o = sp_size + 4 * (idx - 8);
+            if (stack_o >= 2048 || stack_o < -2048)
+            {
+                cout << "  li t3, " << stack_o << "\n";
+                cout << "  add t3, t3, sp\n";
+                cout << "  lw " << reg << ", 0(t3)\n";
+            }
+            else
+            {
+                cout << "  lw " << reg << ", ";
+                cout << stack_o << "(sp)\n";
+            }
+            // cout << "  lw " << reg << ", " << to_string(sp_size + 4 * (idx - 8)) << "(sp)\n";
             return reg;
         }
     }
