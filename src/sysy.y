@@ -51,7 +51,7 @@ using namespace std;
 // 非终结符的类型定义
 %type <ast_val> FuncDef Block Stmt If
 %type <ast_val> Exp PrimaryExp UnaryExp AddExp MulExp LOrExp LAndExp EqExp RelExp
-%type <ast_val> Decl ConstDecl BType ConstDef ConstDefList ConstInitVal BlockItem LVal ConstExp LeVal BlockItemList VarDecl VarDef InitVar VarDefList
+%type <ast_val> Decl ConstDecl ConstDef ConstDefList ConstInitVal BlockItem LVal ConstExp LeVal BlockItemList VarDecl VarDef InitVar VarDefList
 %type <int_val> Number
 %type <ast_deq> DefList
 %type <ast_val> FuncFParams FuncFParam FuncRParams
@@ -611,10 +611,6 @@ ConstExp
   }
   ;
 
-BType
-  : INT {
-  }
-  ;
 
 LVal 
   : IDENT {

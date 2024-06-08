@@ -62,8 +62,6 @@ public:
     // 用智能指针管理对象
     unique_ptr<deque<unique_ptr<BaseAST>>> DefList;
     int func_num;
-    // vector<unique_ptr<BaseAST>> DeclList;
-    // vector<unique_ptr<BaseAST>> FuncList;
 
     void Dump() const override
     {
@@ -94,25 +92,21 @@ public:
         symbol_list.addSymbol("stoptime", Value(FUNC, 0, 0));
 
         int n = (*DefList).size();
+
+        // global variable
         for (int i = 0; i < n - func_num; i++)
         {
-            // is_global = true;
             if (n == func_num)
                 break;
             ((*DefList)[i])->Koopa();
-            // is_global = false;
             koopa_str += "\n";
         }
 
+        // function: in inverted order
         for (int i = n - 1; i >= n - func_num; i--)
         {
-            // is_global = true;
             ((*DefList)[i])->Koopa();
-            // is_global = false;
         }
-
-        // if (n >= 1)
-        //     ((*DefList)[n - 1])->Koopa();
 
         return make_pair(false, -1);
     }
@@ -300,7 +294,6 @@ public:
 };
 
 // lv8
-// not finish
 // FuncFParam
 // INT IDENT
 class FuncFParamAST : public BaseAST
@@ -383,36 +376,6 @@ public:
         return rparams;
     }
 };
-
-// lv4+
-// FuncType
-// class FuncTypeAST : public BaseAST
-// {
-// public:
-//     string type;
-
-//     void Dump() const override
-//     {
-//         cout << "FuncTypeAST { ";
-//         cout << type;
-//         cout << " }";
-//     }
-
-//     pair<bool, int> Koopa() const override
-//     {
-//         if (type == "int")
-//         {
-//             is_void = false;
-//             koopa_str += ": i32 ";
-//         }
-//         else if (type == "void")
-//         {
-//             is_void = true;
-//             koopa_str += " ";
-//         }
-//         return make_pair(false, -1);
-//     }
-// };
 
 // lv4+
 // Block lv4
@@ -511,7 +474,6 @@ public:
     unique_ptr<BaseAST> exp;
     unique_ptr<BaseAST> leval;
     unique_ptr<BaseAST> block;
-    // unique_ptr<BaseAST> if_stmt;
 
     void Dump() const override
     {
@@ -656,7 +618,6 @@ public:
                 block_end[block_now] = false;
                 koopa_str += end_tag + ":\n";
             }
-            // koopa_str += end_tag + ":\n";
         }
         // if_cnt--;
         return make_pair(false, -1);
@@ -772,9 +733,6 @@ public:
             koopa_str += "  jump " + entry_name + "\n\n";
         }
 
-        // koopa_str += body_name + "_:\n";
-        // koopa_str += "  jump " + entry_name + "\n\n";
-
         koopa_str += end_name + ":\n";
 
         loop_dep--;
@@ -806,8 +764,6 @@ public:
     }
     pair<bool, int> Koopa() const override
     {
-        // if (loop_dep < 1)
-        //     assert(false);
         int tag = find_loop[loop_dep];
         // break: 跳转到%while_end
         if (rule == 0)
@@ -950,7 +906,6 @@ public:
                         return make_pair(true, 1);
                     return make_pair(true, 0);
 
-                    ////////////////
                     koopa_str += "  %" + to_string(reg_cnt) + " = eq " + to_string(res.second) + ", 0\n";
                     reg_cnt++;
                 }
@@ -958,7 +913,6 @@ public:
                 {
                     return make_pair(true, -res.second);
 
-                    /////////////////
                     koopa_str += "  %" + to_string(reg_cnt) + " = sub 0, " + to_string(res.second) + "\n";
                     reg_cnt++;
                 }
@@ -1029,7 +983,6 @@ public:
         Value func = symbol_list.getSymbol(ident);
         if (func.type != TYPE::FUNC)
         {
-            // cout << func.type << endl;
             // assert(false); //??
         }
         vector<pair<bool, int>> rparams_now;
@@ -1711,7 +1664,6 @@ public:
             // 短路求值：lhs是0？
             // step1: 判断lhs是否是0
             // case1：lhs是一个数字
-
             if (res_l.first)
             {
                 if (res_l.second == 0)
@@ -1719,8 +1671,7 @@ public:
                     return make_pair(true, 0);
                 }
                 // 如果不是0的话，直接忽略掉就好了？
-                // 不行？
-                // 为了统一后续的格式，要放到内存里？
+                // 可以
                 koopa_str += "  jump " + then_tag + "\n\n";
             }
             else
@@ -1735,21 +1686,24 @@ public:
             // 这里，lhs非0
             if (res_r.first)
             {
+                // res默认为0，所以如果是0，无需改变，直接jump即可
                 if (res_r.second == 0)
                 {
                     koopa_str += "  jump " + end_tag + "\n\n";
                 }
                 else
                 { // 已知只有非0的时候会到达这里
+                  // 把res记为1再jump
                     koopa_str += "  store 1, " + res_tag + "\n";
                     koopa_str += "  jump " + end_tag + "\n\n";
                 }
             }
             else
-            {
-
+            { // 结果在寄存器中
+                // step1: 寄存器中的值是否为0？如果是0返回0，否则返回1
                 koopa_str += "  %" + to_string(reg_cnt) + " = ne %" + to_string(rightreg) + ", 0\n";
                 reg_cnt++;
+                // step2: 把step1返回的结果存入res，然后jump
                 koopa_str += "  store %" + to_string(reg_cnt - 1) + ", " + res_tag + "\n";
                 koopa_str += "  jump " + end_tag + "\n\n";
             }
@@ -1820,6 +1774,8 @@ public:
 
             pair<bool, int> res_l = lorexp->Koopa();
             int leftreg = reg_cnt - 1;
+
+            // 以下过程近似于LAndExp的短路求值，注释略去
 
             if (res_l.first)
             {

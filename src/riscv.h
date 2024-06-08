@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include "koopa.h"
 #include "assert.h"
+#include <algorithm>
+#include "math.h"
 
 void Visit(const koopa_raw_program_t &program);
 void Visit(const koopa_raw_slice_t &slice);
@@ -23,6 +25,9 @@ void Visit(const koopa_raw_load_t &load, const koopa_raw_value_t &value);
 
 void Visit(const koopa_raw_branch_t &branch);
 void Visit(const koopa_raw_jump_t &jump);
+
+void Visit(const koopa_raw_call_t &call, const koopa_raw_value_t &value);
+void Visit(const koopa_raw_global_alloc_t &global, const koopa_raw_value_t &value);
 
 void parse_raw_program(const char *str);
 

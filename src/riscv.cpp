@@ -12,6 +12,10 @@ static int stack_offset = 0;
 static int align_t = 16;
 static int sp_size;
 
+// lv8
+bool has_call;
+int max_stack_arg;
+
 // 返回变量在栈上的偏移量
 int get_stack_pos(const koopa_raw_value_t &value)
 {
@@ -24,14 +28,20 @@ int get_stack_pos(const koopa_raw_value_t &value)
     return regs[value];
 }
 
+// lv8
 // 访问 raw program
 void Visit(const koopa_raw_program_t &program)
 {
     // 执行一些其他的必要操作
     // ...
     // 访问所有全局变量
-    Visit(program.values);
+    if (program.values.len != 0)
+    {
+        cout << "  .data";
+        Visit(program.values);
+    }
     // 访问所有函数
+    cout << "\n  .text";
     Visit(program.funcs);
 }
 
@@ -63,15 +73,24 @@ void Visit(const koopa_raw_slice_t &slice)
     }
 }
 
+// lv8
 // lv4完成
 // 访问函数
 void Visit(const koopa_raw_function_t &func)
 {
     // 执行一些其他的必要操作
     // ...
-    cout << "  .text\n";
-    cout << "  .globl " << func->name + 1 << "\n";
+    has_call = false;
+    max_stack_arg = 0;
+    stack_offset = 0;
+    // 跳过库函数
+    if (func->bbs.len == 0)
+    {
+        return;
+    }
+    cout << "\n  .globl " << func->name + 1 << "\n";
     cout << func->name + 1 << ":\n";
+
     // 开辟栈帧
     sp_size = cal_func_size(func);
     // 16字节对齐
@@ -86,8 +105,11 @@ void Visit(const koopa_raw_function_t &func)
     {
         cout << "  addi sp, sp, -" << sp_size << "\n";
     }
-    // 访问所有基本块
-    // 此时只有一个基本块
+    if (has_call)
+    {
+        cout << "  sw ra, " << to_string(sp_size - 4) << "(sp)\n";
+    }
+
     Visit(func->bbs);
 }
 
@@ -111,6 +133,7 @@ void Visit(const koopa_raw_value_t &value)
 {
     // 根据指令类型判断后续需要如何访问
     const auto &kind = value->kind;
+
     switch (kind.tag)
     {
     case KOOPA_RVT_RETURN:
@@ -144,18 +167,25 @@ void Visit(const koopa_raw_value_t &value)
         // 访问 jump 指令
         Visit(kind.data.jump);
         break;
+    case KOOPA_RVT_CALL:
+        Visit(kind.data.call, value);
+        break;
+    case KOOPA_RVT_GLOBAL_ALLOC:
+        Visit(kind.data.global_alloc, value);
+        break;
     default:
         // 其他类型暂时遇不到
         assert(false);
     }
 }
 
-// lv4 :
+// lv8
 // 把value放入临时寄存器reg
 // 返回值含义：
 // 实际使用的寄存器
 string load_to_reg(const koopa_raw_value_t &value, const string &reg)
 {
+
     // 0直接使用x0寄存器
     // 如果0在左边就不用x0，因为要确保左值的寄存器可用
     if (value->kind.tag == KOOPA_RVT_INTEGER && value->kind.data.integer.value == 0 && reg != "t0")
@@ -172,6 +202,33 @@ string load_to_reg(const koopa_raw_value_t &value, const string &reg)
         Visit(value->kind.data.integer);
         cout << "\n";
 
+        return reg;
+    }
+
+    // 参数
+    else if (value->kind.tag == KOOPA_RVT_FUNC_ARG_REF)
+    {
+        int idx = value->kind.data.func_arg_ref.index;
+        // 寄存器里的参数
+        if (idx < 8)
+        {
+            return "a" + to_string(idx);
+        }
+        // 栈上的参数
+        else
+        {
+            cout << "  lw " << reg << ", " << to_string(sp_size + 4 * (idx - 8)) << "(sp)\n";
+            return reg;
+        }
+    }
+
+    // 全局变量
+    // 先获取变量所在地址
+    // 然后把地址中的变量加载到寄存器
+    else if (value->kind.tag == KOOPA_RVT_GLOBAL_ALLOC)
+    {
+        cout << "  la " << reg << ", " << value->name + 1 << "\n";
+        cout << "  lw " << reg << ", 0(" << reg << ")\n";
         return reg;
     }
 
@@ -325,20 +382,30 @@ void Visit(const koopa_raw_binary_t &binary, const koopa_raw_value_t &value)
     }
 }
 
+// lv8: global alloc
 // store指令
 void Visit(const koopa_raw_store_t &store)
 {
-    string reg = load_to_reg(store.value, "t0");
-    int stack_pos = get_stack_pos(store.dest);
-    if (stack_pos >= 2048 || stack_pos < -2048)
+    if (store.dest->kind.tag == KOOPA_RVT_GLOBAL_ALLOC)
     {
-        cout << "  li t4, " << stack_pos << "\n";
-        cout << "  add t4, t4, sp\n";
-        cout << "  sw " << reg << ", 0(t4)\n";
+        cout << "  la t1, " << store.dest->name + 1 << "\n";
+        load_to_reg(store.value, "t0");
+        cout << "  sw t0, 0(t1)\n";
     }
     else
     {
-        cout << "  sw " << reg << ", " << stack_pos << "(sp)\n";
+        string reg = load_to_reg(store.value, "t0");
+        int stack_pos = get_stack_pos(store.dest);
+        if (stack_pos >= 2048 || stack_pos < -2048)
+        {
+            cout << "  li t4, " << stack_pos << "\n";
+            cout << "  add t4, t4, sp\n";
+            cout << "  sw " << reg << ", 0(t4)\n";
+        }
+        else
+        {
+            cout << "  sw " << reg << ", " << stack_pos << "(sp)\n";
+        }
     }
 }
 
@@ -358,32 +425,41 @@ void Visit(const koopa_raw_load_t &load, const koopa_raw_value_t &value)
         cout << "  sw t0, " << stack_pos << "(sp)\n";
     }
 }
-// lv4完成
+
 // ret指令
 void Visit(const koopa_raw_return_t &ret)
 {
     // 将返回值放入a0
-    if (ret.value->kind.tag == KOOPA_RVT_INTEGER)
+    if (ret.value != nullptr)
     {
-        cout << "  li a0, ";
-        Visit(ret.value->kind.data.integer);
-        cout << "\n";
-    }
-    else
-    {
-        int stack_pos = regs[ret.value];
-        if (stack_pos >= 2048 || stack_pos < -2048)
+        if (ret.value->kind.tag == KOOPA_RVT_INTEGER)
         {
-            cout << "  li t0, " << stack_pos << "\n";
-            cout << "  add t0, t0, sp\n";
-            cout << "  lw a0, 0(t0)\n";
+            cout << "  li a0, ";
+            Visit(ret.value->kind.data.integer);
+            cout << "\n";
         }
         else
         {
-            cout << "  lw a0, " << stack_pos << "(sp)\n";
+            int stack_pos = regs[ret.value];
+            if (stack_pos >= 2048 || stack_pos < -2048)
+            {
+                cout << "  li t0, " << stack_pos << "\n";
+                cout << "  add t0, t0, sp\n";
+                cout << "  lw a0, 0(t0)\n";
+            }
+            else
+            {
+                cout << "  lw a0, " << stack_pos << "(sp)\n";
+            }
         }
     }
     // 函数的epilogue
+
+    if (has_call)
+    {
+        cout << "  lw ra, " << to_string(sp_size - 4) << "(sp)\n";
+    }
+
     if (sp_size >= 2048)
     {
         cout << "  li t0, " << sp_size << "\n";
@@ -416,6 +492,51 @@ void Visit(const koopa_raw_jump_t &jump)
     cout << "  j " << jump.target->name + 1 << "\n";
 }
 
+// lv8 call
+void Visit(const koopa_raw_call_t &call, const koopa_raw_value_t &value)
+{
+
+    int args_num = call.args.len;
+    for (int i = 0; i < min(args_num, 8); i++)
+    {
+        const koopa_raw_value_t arg = reinterpret_cast<koopa_raw_value_t>(call.args.buffer[i]);
+        load_to_reg(arg, "a" + to_string(i));
+    }
+
+    // 保存在调用者栈帧
+    if (args_num > 8)
+    {
+        for (int i = 8; i < args_num; i++)
+        {
+            const koopa_raw_value_t arg = reinterpret_cast<koopa_raw_value_t>(call.args.buffer[i]);
+            load_to_reg(arg, "t0");
+            cout << "  sw t0, " << to_string((i - 8) * 4) + "(sp)\n";
+        }
+    }
+
+    cout << "  call " << call.callee->name + 1 << "\n";
+
+    if (value->ty->tag != KOOPA_RTT_UNIT)
+    {
+        cout << "  sw a0, " << get_stack_pos(value) << "(sp)\n";
+    }
+}
+
+// lv8 global variable
+void Visit(const koopa_raw_global_alloc_t &global, const koopa_raw_value_t &value)
+{
+    cout << "\n  .globl " << value->name + 1 << "\n";
+    cout << value->name + 1 << ":\n";
+    if (global.init->kind.tag == KOOPA_RVT_ZERO_INIT)
+    {
+        cout << "  .zero 4\n";
+    }
+    else
+    {
+        cout << "  .word " << global.init->kind.data.integer.value << "\n";
+    }
+}
+
 // ...
 void parse_raw_program(const char *str)
 {
@@ -439,6 +560,8 @@ void parse_raw_program(const char *str)
     koopa_delete_raw_program_builder(builder);
 }
 
+// lv8
+// 考虑call
 // 计算函数栈帧（未对齐）
 int cal_func_size(const koopa_raw_function_t &func)
 {
@@ -448,9 +571,22 @@ int cal_func_size(const koopa_raw_function_t &func)
         const koopa_raw_basic_block_t block = reinterpret_cast<koopa_raw_basic_block_t>(func->bbs.buffer[i]);
         func_size += cal_basic_block_size(block);
     }
+    // ra寄存器
+    if (has_call)
+    {
+        func_size += 4;
+    }
+    // caller参数栈
+    func_size += max_stack_arg * 4;
+
+    stack_offset += max_stack_arg * 4;
+    // 需要吗？
+    //  func_size += func->params.len;
+
     return func_size;
 }
 
+// lv8
 // 计算基本块栈帧
 int cal_basic_block_size(const koopa_raw_basic_block_t &bb)
 {
@@ -458,6 +594,11 @@ int cal_basic_block_size(const koopa_raw_basic_block_t &bb)
     for (uint32_t i = 0; i < bb->insts.len; i++)
     {
         const koopa_raw_value_t inst = reinterpret_cast<koopa_raw_value_t>(bb->insts.buffer[i]);
+        if (inst->kind.tag == KOOPA_RVT_CALL)
+        {
+            has_call = true;
+            max_stack_arg = max(max_stack_arg, (int)(inst->kind.data.call.args.len - 8));
+        }
         bb_size += cal_inst_size(inst);
     }
     return bb_size;
