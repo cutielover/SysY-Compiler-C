@@ -39,6 +39,7 @@ using namespace std;
   int int_val;
   BaseAST *ast_val;
   deque<unique_ptr<BaseAST>> *ast_deq;
+  vector<unique_ptr<BaseAST>> *ast_vec;
 }
 
 // lexer 返回的所有 token 种类的声明
@@ -51,17 +52,14 @@ using namespace std;
 // 非终结符的类型定义
 %type <ast_val> FuncDef Block Stmt If
 %type <ast_val> Exp PrimaryExp UnaryExp AddExp MulExp LOrExp LAndExp EqExp RelExp
-%type <ast_val> Decl ConstDecl ConstDef ConstDefList ConstInitVal BlockItem LVal ConstExp LeVal BlockItemList VarDecl VarDef InitVar VarDefList
+%type <ast_val> Decl ConstDecl ConstDef ConstDefList ConstInitVal BlockItem LVal ConstExp LeVal BlockItemList VarDecl VarDef InitVal VarDefList
 %type <int_val> Number
 %type <ast_deq> DefList
 %type <ast_val> FuncFParams FuncFParam FuncRParams
+%type <ast_vec> ArraySizeList InitValList
 %%
 
-// 开始符, CompUnit ::= FuncDef, 大括号后声明了解析完成后 parser 要做的事情
-// 之前我们定义了 FuncDef 会返回一个 str_val, 也就是字符串指针
-// 而 parser 一旦解析完 CompUnit, 就说明所有的 token 都被解析了, 即解析结束了
-// 此时我们应该把 FuncDef 返回的结果收集起来, 作为 AST 传给调用 parser 的函数
-// $1 指代规则里第一个符号的返回值, 也就是 FuncDef 的返回值
+
 CompUnit
   : DefList {
     auto comp_unit = make_unique<CompUnitAST>();
@@ -101,16 +99,6 @@ DefList
   }
   ;
 
-// FuncDef ::= FuncType IDENT '(' ')' Block;
-// 我们这里可以直接写 '(' 和 ')', 因为之前在 lexer 里已经处理了单个字符的情况
-// 解析完成后, 把这些符号的结果收集起来, 然后拼成一个新的字符串, 作为结果返回
-// $$ 表示非终结符的返回值, 我们可以通过给这个符号赋值的方法来返回结果
-// 你可能会问, FuncType, IDENT 之类的结果已经是字符串指针了
-// 为什么还要用 unique_ptr 接住它们, 然后再解引用, 把它们拼成另一个字符串指针呢
-// 因为所有的字符串指针都是我们 new 出来的, new 出来的内存一定要 delete
-// 否则会发生内存泄漏, 而 unique_ptr 这种智能指针可以自动帮我们 delete
-// 虽然此处你看不出用 unique_ptr 和手动 delete 的区别, 但当我们定义了 AST 之后
-// 这种写法会省下很多内存管理的负担
 FuncDef
   : INT IDENT '(' ')' Block {
     auto ast = new FuncDefAST();
@@ -161,15 +149,45 @@ FuncFParams
   }
   ;
 
+// lv9 done
 FuncFParam
   : INT IDENT {
     auto ast = new FuncFParamAST();
     ast->type = "int";
     ast->name_ = *unique_ptr<string>($2);
     $$ = ast;
+  } 
+  | INT IDENT '[' ']' {
+    auto ast = new FuncFParamAST();
+    ast->type = "array";
+    ast->name_ = *unique_ptr<string>($2);
+    $$ = ast;
+  } 
+  | INT IDENT '[' ']' ArraySizeList {
+    auto ast = new FuncFParamAST();
+    ast->type = "array";
+    ast->name_ = *unique_ptr<string>($2);
+    vector<unique_ptr<BaseAST>> *v_ptr = ($5);
+    for (auto it = v_ptr->begin(); it != v_ptr->end(); it++)
+      ast->array_size_list.push_back(move(*it));
+    $$ = ast;
   }
   ;
-  
+
+// lv9 done
+ArraySizeList
+  : '[' Exp ']' {
+    vector<unique_ptr<BaseAST>> *v = new vector<unique_ptr<BaseAST>>;
+    v->push_back(unique_ptr<BaseAST>($2));
+    $$ = v;
+  } 
+  | ArraySizeList '[' Exp ']' {
+    vector<unique_ptr<BaseAST>> *v = ($1);
+    v->push_back(unique_ptr<BaseAST>($3));
+    $$ = v;
+  }
+  ;
+
 FuncRParams
   : Exp ',' FuncRParams {
     auto ast = new FuncRParamsAST();
@@ -318,6 +336,7 @@ Number
     $$ = ($1);
   }
   ;
+
 
 Exp
   : LOrExp {
@@ -586,23 +605,35 @@ ConstDefList
   }
   ;
 
+// lv9 done
 ConstDef
-  : IDENT '=' ConstInitVal {
+  : IDENT '=' InitVal {
     auto ast = new ConstDefAST();
     ast->ident = *unique_ptr<string>($1);
     ast->constinitval = unique_ptr<BaseAST>($3);
     $$ = ast;
-  }
-  ;
-
-ConstInitVal
-  :ConstExp {
-    auto ast = new ConstInitValAST();
-    ast->constexp = unique_ptr<BaseAST>($1);
+  } 
+  | IDENT ArraySizeList '=' InitVal {
+    auto ast = new ConstDefArrayAST();
+    ast->ident = *unique_ptr<string>($1);
+    ast->constinitval = unique_ptr<BaseAST>($4);
+    vector<unique_ptr<BaseAST>> *v_ptr = ($2);
+    for (auto it = v_ptr->begin(); it != v_ptr->end(); it++)
+      ast->array_size_list.push_back(move(*it));
     $$ = ast;
   }
   ;
 
+// lv9 remove
+ConstInitVal
+  : Exp {
+    auto ast = new ConstInitValAST();
+    ast->constexp = unique_ptr<BaseAST>($1);
+    $$ = ast;
+  } 
+  ;
+
+// lv9 remove
 ConstExp
   : Exp {
     auto ast = new ConstExpAST();
@@ -618,12 +649,28 @@ LVal
     ast->ident = *unique_ptr<string>($1);
     $$ = ast;
   }
+  | IDENT ArraySizeList {
+    auto ast = new LValArrayAST();
+    ast->ident = *unique_ptr<string>($1);
+    vector<unique_ptr<BaseAST>> *v_ptr = ($2);
+    for(auto it = v_ptr->begin(); it != v_ptr->end(); it++)
+      ast->array_size_list.push_back(move(*it));
+    $$ = ast;
+  }
   ;
 
 LeVal
   : IDENT{
     auto ast = new LeValAST();
     ast->ident = *unique_ptr<string>($1);
+    $$ = ast;
+  }
+  | IDENT ArraySizeList {
+    auto ast = new LeValArrayAST();
+    ast->ident = *unique_ptr<string>($1);
+    vector<unique_ptr<BaseAST>> *v_ptr = ($2);
+    for(auto it = v_ptr->begin(); it != v_ptr->end(); it++)
+      ast->array_size_list.push_back(move(*it));
     $$ = ast;
   }
   ;
@@ -652,6 +699,7 @@ VarDefList
   }
   ;
 
+// lv9 done
 VarDef
   : IDENT {
     auto ast = new VarDefAST();
@@ -659,22 +707,70 @@ VarDef
     ast->ident = *unique_ptr<string>($1);
     $$ = ast;
   }
-  | IDENT '=' InitVar {
+  | IDENT '=' InitVal {
     auto ast = new VarDefAST();
     ast->rule = 1;
     ast->ident = *unique_ptr<string>($1);
     ast->initval = unique_ptr<BaseAST>($3);
     $$ = ast;
   }
+  | IDENT ArraySizeList {
+    auto ast = new VarDefArrayAST();
+    ast->rule = 0;
+    ast->ident = *unique_ptr<string>($1);
+    vector<unique_ptr<BaseAST>> *v_ptr = ($2);
+    for (auto it = v_ptr->begin(); it != v_ptr->end(); it++)
+      ast->array_size_list.push_back(move(*it));
+    $$ = ast;
+  }
+  | IDENT ArraySizeList '=' InitVal {
+    auto ast = new VarDefArrayAST();
+    ast->rule = 1;
+    ast->ident = *unique_ptr<string>($1);
+    ast->init_val = unique_ptr<BaseAST>($4);
+    vector<unique_ptr<BaseAST>> *v_ptr = ($2);
+    for (auto it = v_ptr->begin(); it != v_ptr->end(); it++)
+      ast->array_size_list.push_back(move(*it));
+    $$ = ast;
+  }
   ;
 
-InitVar
+// lv9 done
+InitVal
   : Exp {
     auto ast = new InitValAST();
     ast->exp = unique_ptr<BaseAST>($1);
     $$ = ast;
   }
+  | '{' '}' {
+    auto ast = new InitValWithListAST();
+    $$ = ast;
+  }
+  | '{' InitValList '}' {
+    auto ast = new InitValWithListAST();
+    vector<unique_ptr<BaseAST>> *v_ptr = ($2);
+    for (auto it = v_ptr->begin(); it != v_ptr->end(); it++)
+      ast->init_val_list.push_back(move(*it));
+    $$ = ast;  
+  }
   ;
+
+
+// lv9 done
+InitValList
+  : InitVal {
+    vector<unique_ptr<BaseAST>> *v = new vector<unique_ptr<BaseAST>>;
+    v->push_back(unique_ptr<BaseAST>($1));
+    $$ = v;
+  }
+  | InitValList ',' InitVal {
+    vector<unique_ptr<BaseAST>> *v = ($1);
+    v->push_back(unique_ptr<BaseAST>($3));
+    $$ = v;
+  }
+  ;
+
+
 %%
 
 // 定义错误处理函数, 其中第二个参数是错误信息

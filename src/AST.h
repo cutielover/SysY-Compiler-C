@@ -30,12 +30,75 @@ static bool if_end = true;
 
 // lv8 function
 static bool param_block = false;
-static vector<string> function_params;
-
+static vector<pair<string, int>> function_params; // 记录函数的形参，用于在函数体内部延迟加入符号表
+                                                  // lv9 update: 由于新加入了数组参数，加入一个标识，0=int;size=ptr
 // lv8 global var
 static bool is_global = true;
 
 extern SymbolList symbol_list;
+
+/**
+ * 完成对Local数组初始化的IR生成
+ * @param name_: 数组在Koopa IR中的名字
+ * @param ptr: 指向数组的内容，例如{"1", "%2"}
+ * @param len: 描述数组类型，i.e. 各个维度的长
+ */
+static void initArray(std::string name_, std::string *ptr, const std::vector<int> &len)
+{
+    int n = len[0];
+    if (len.size() == 1)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            string tmp = "%" + to_string(reg_cnt);
+            reg_cnt++;
+            koopa_str += "  " + tmp + " = getelemptr " + name_ + ", " + to_string(i) + "\n";
+            koopa_str += "  store " + ptr[i] + ", " + tmp + "\n";
+        }
+    }
+    else
+    {
+        vector<int> sublen(len.begin() + 1, len.end());
+        int width = 1;
+        for (auto l : sublen)
+            width *= l;
+        for (int i = 0; i < n; ++i)
+        {
+            string tmp = "%" + to_string(reg_cnt);
+            reg_cnt++;
+            koopa_str += "  " + tmp + " = getelemptr " + name_ + ", " + to_string(i) + "\n";
+            initArray(tmp, ptr + i * width, sublen);
+        }
+    }
+}
+
+static string getInitList(std::string *ptr, const std::vector<int> &len)
+{
+    std::string ret = "{";
+    if (len.size() == 1)
+    {
+        int n = len[0];
+        ret += ptr[0];
+        for (int i = 1; i < n; ++i)
+        {
+            ret += ", " + ptr[i];
+        }
+    }
+    else
+    {
+        int n = len[0], width = 1;
+        std::vector<int> sublen(len.begin() + 1, len.end());
+        for (auto iter = len.end() - 1; iter != len.begin(); --iter)
+            width *= *iter;
+        ret += getInitList(ptr, sublen);
+        for (int i = 1; i < n; ++i)
+        {
+            ret += ", " + getInitList(ptr + width * i, sublen);
+        }
+    }
+    ret += "}";
+    return ret;
+}
 
 // lv4+
 // 所有 AST 的基类
@@ -51,7 +114,10 @@ public:
     // int: 能计算出的值；对于不能计算出的值，返回-1
     virtual pair<bool, int> Koopa() const { return make_pair(false, -1); }
     virtual string name() const { return "oops"; }
+    // 用于计算初始化的值
+    // 必定能计算出来，否则是程序的问题
     virtual int calc() const { return 0; }
+    virtual bool is_list() const { return false; }
 };
 
 // lv4+
@@ -76,12 +142,15 @@ public:
 
     pair<bool, int> Koopa() const override
     {
+        // 符号表++
         symbol_list.newMap();
 
+        // 库函数声明
         koopa_str += "decl @getint(): i32\ndecl @getch() : i32\ndecl @getarray(*i32) : i32\n";
         koopa_str += "decl @putint(i32)\ndecl @putch(i32)\ndecl @putarray(i32, *i32)\n";
         koopa_str += "decl @starttime()\ndecl @stoptime()\n\n\n";
 
+        // 库函数加入符号表
         symbol_list.addSymbol("getint", Value(FUNC, 1, 0));
         symbol_list.addSymbol("getch", Value(FUNC, 1, 0));
         symbol_list.addSymbol("getarray", Value(FUNC, 1, 0));
@@ -93,16 +162,18 @@ public:
 
         int n = (*DefList).size();
 
-        // global variable
+        // 全局变量
         for (int i = 0; i < n - func_num; i++)
         {
             if (n == func_num)
                 break;
             ((*DefList)[i])->Koopa();
-            koopa_str += "\n";
+            // koopa_str += "\n";
         }
 
-        // function: in inverted order
+        koopa_str += "\n";
+
+        // 函数: in inverted order
         for (int i = n - 1; i >= n - func_num; i--)
         {
             ((*DefList)[i])->Koopa();
@@ -220,6 +291,7 @@ public:
 
         koopa_str += "(";
 
+        // 不在函数体内，声明参数
         param_block = false;
         funcfparams->Koopa();
 
@@ -240,6 +312,7 @@ public:
         koopa_str += "{\n";
         koopa_str += "\%entry:\n";
 
+        // 在函数体内，把参数加载出来
         param_block = true;
         funcfparams->Koopa();
 
@@ -261,7 +334,6 @@ public:
 };
 
 // lv8
-// not finish
 // FuncFParams
 class FuncFParamsAST : public BaseAST
 {
@@ -293,7 +365,8 @@ public:
     }
 };
 
-// lv8
+/////////////////////////////////////////////////////////////////////////////////////////////////
+// lv9 update
 // FuncFParam
 // INT IDENT
 class FuncFParamAST : public BaseAST
@@ -301,6 +374,7 @@ class FuncFParamAST : public BaseAST
 public:
     string type;
     string name_;
+    vector<unique_ptr<BaseAST>> array_size_list;
     void Dump() const override
     {
         cout << "FuncFParamAST { ";
@@ -317,6 +391,19 @@ public:
                 string param_tag = "@" + name_ + "_" + to_string(block_cnt + 1) + "_param";
                 koopa_str += param_tag + ": i32";
             }
+            else if (type == "array")
+            {
+                string param_tag = "@" + name_ + "_" + to_string(block_cnt + 1) + "_param";
+                koopa_str += param_tag + ": ";
+
+                string type_tag = "i32";
+                int len = array_size_list.size();
+                for (int i = len - 1; i >= 0; i--)
+                {
+                    type_tag = "[" + type_tag + ", " + to_string(array_size_list[i]->calc()) + "]";
+                }
+                koopa_str += "*" + type_tag;
+            }
         }
         // 函数体内 为参数分配内存空间
         else
@@ -327,7 +414,24 @@ public:
                 string use_tag = "@" + name_ + "_" + to_string(block_cnt + 1);
                 koopa_str += "  " + use_tag + " = alloc i32\n";
                 koopa_str += "  store " + param_tag + ", " + use_tag + "\n";
-                function_params.emplace_back(name_);
+                function_params.emplace_back(make_pair(name_, 0));
+            }
+            else if (type == "array")
+            {
+                string type_tag = "i32";
+                int len = array_size_list.size();
+                for (int i = len - 1; i >= 0; i--)
+                {
+                    type_tag = "[" + type_tag + ", " + to_string(array_size_list[i]->calc()) + "]";
+                }
+                string param_tag = "@" + name_ + "_" + to_string(block_cnt + 1) + "_param";
+                string use_tag = "@" + name_ + "_" + to_string(block_cnt + 1);
+
+                koopa_str += "  " + use_tag + " = alloc *" + type_tag + "\n";
+                koopa_str += "  store " + param_tag + ", " + use_tag + "\n";
+
+                int pointer_size = len + 1;
+                function_params.emplace_back(make_pair(name_, pointer_size));
             }
         }
         return make_pair(false, -1);
@@ -339,6 +443,7 @@ public:
     }
 };
 
+// lv9 ?
 // lv8
 // FuncRParams
 class FuncRParamsAST : public BaseAST
@@ -377,6 +482,7 @@ public:
     }
 };
 
+// lv9 update
 // lv4+
 // Block lv4
 class BlockAST : public BaseAST
@@ -410,10 +516,21 @@ public:
         // 记录：设置当前块为未完结的
         block_end.push_back(false);
 
+        // 参数加入符号表
+        // lv9 update: 数组指针
         for (int i = 0; i < function_params.size(); i++)
         {
-            Value param = Value(VAR, 0, block_now);
-            symbol_list.addSymbol(function_params[i], param);
+            if (function_params[i].second == 0)
+            {
+                Value param = Value(VAR, 0, block_now);
+                symbol_list.addSymbol(function_params[i].first, param);
+            }
+            else
+            {
+                // 指针的val是[]的数量，例：如果参数是a[]，则val记为1
+                Value param = Value(POINTER, function_params[i].second, block_now);
+                symbol_list.addSymbol(function_params[i].first, param);
+            }
         }
 
         function_params.clear();
@@ -439,29 +556,6 @@ public:
         symbol_list.deleteMap();
 
         return make_pair(false, -1);
-    }
-};
-
-// Leval 左值变量 IDENT lv4
-class LeValAST : public BaseAST
-{
-public:
-    string ident;
-    void Dump() const override
-    {
-        cout << "LeVal { ";
-        cout << ident;
-        cout << " }";
-    };
-    pair<bool, int> Koopa() const override
-    {
-        // koopa_str += "store %" + to_string(reg_cnt - 1) + ", @" + ident + "\n";
-        return make_pair(false, -1);
-    };
-    string name() const override
-    {
-        Value var = symbol_list.getSymbol(ident);
-        return ident + "_" + to_string(var.name_index);
     }
 };
 
@@ -503,16 +597,17 @@ public:
 
     pair<bool, int> Koopa() const override
     {
-        if (rule == 0)
+        if (rule == 0) // 赋值
         {
+            string val_name = leval->name();
             pair<bool, int> res = exp->Koopa();
             if (res.first)
             {
-                koopa_str += "  store " + to_string(res.second) + ", @" + leval->name() + "\n";
+                koopa_str += "  store " + to_string(res.second) + ", " + val_name + "\n";
             }
             else
             {
-                koopa_str += "  store %" + to_string(reg_cnt - 1) + ", @" + leval->name() + "\n";
+                koopa_str += "  store %" + to_string(reg_cnt - 1) + ", " + val_name + "\n";
             }
             block_end[block_now] = false;
         }
@@ -1908,7 +2003,7 @@ class ConstDefAST : public BaseAST
 {
 public:
     string ident;
-    unique_ptr<BaseAST> constinitval;
+    unique_ptr<BaseAST> constinitval; // InitValAST
     void Dump() const override
     {
         cout << "ConstDef { ";
@@ -1925,6 +2020,149 @@ public:
         // var_type[ident] = CONSTANT;
         // // var_val[ident] = constinitval->cal_value();
         // var_val[ident] = (constinitval->Koopa()).second;
+        return make_pair(false, -1);
+    }
+};
+
+// lv9 done
+// 存疑
+class InitValWithListAST : public BaseAST
+{
+public:
+    vector<unique_ptr<BaseAST>> init_val_list;
+    void Dump() const override
+    {
+    }
+    pair<bool, int> Koopa() const override
+    {
+        return make_pair(false, -1);
+    }
+    bool is_list() const override
+    {
+        return true;
+    }
+    void getInitVal(string *ptr, const vector<int> &len)
+    {
+        int n = len.size();
+        vector<int> width(n);
+        width[n - 1] = len[n - 1];
+        for (int i = n - 2; i >= 0; --i)
+        {
+            width[i] = width[i + 1] * len[i];
+        }
+        int i = 0;
+        for (auto &init_val : init_val_list)
+        {
+            if (!init_val->is_list())
+            {
+                if (is_global)
+                {
+                    ptr[i++] = to_string(init_val->calc());
+                }
+                else
+                {
+                    pair<bool, int> res = init_val->Koopa();
+                    if (res.first)
+                    {
+                        ptr[i++] = to_string(res.second);
+                    }
+                    else
+                    {
+                        ptr[i++] = "%" + to_string(reg_cnt - 1);
+                    }
+                }
+            }
+            else
+            {
+                assert(n > 1);
+                int j = n - 1;
+                if (i == 0)
+                {
+                    j = 1;
+                }
+                else
+                {
+                    j = n - 1;
+                    for (; j >= 0; --j)
+                    {
+                        if (i % width[j] != 0)
+                            break;
+                    }
+                    assert(j < n - 1);
+                    ++j;
+                }
+                dynamic_cast<InitValWithListAST *>(init_val.get())->getInitVal(ptr + i, vector<int>(len.begin() + j, len.end()));
+                i += width[j];
+            }
+            if (i >= width[0])
+                break;
+        }
+    }
+};
+
+// lv9 done
+// unfinished
+// 示例 const int a[10] = {1, 2, 3, 4, 5};
+// 注意不能够像int常量一样直接存入符号表
+// 必须体现在IR当中
+class ConstDefArrayAST : public BaseAST
+{
+public:
+    string ident;
+    unique_ptr<BaseAST> constinitval; // InitValWithListAST 列表
+    vector<unique_ptr<BaseAST>> array_size_list;
+    void Dump() const override
+    {
+    }
+    pair<bool, int> Koopa() const override
+    {
+        vector<int> len;
+        for (auto &i : array_size_list)
+        {
+            len.push_back(i->calc());
+        }
+        int array_size = array_size_list.size();
+        Value const_array = Value(ARRAY, array_size, block_now);
+        // 数组放入符号表
+        symbol_list.addSymbol(ident, const_array);
+
+        // 处理初始化列表
+        // 先把所有初始值置为0
+        // 再根据constinitval的值来修改
+        int tot_len = 1;
+        for (auto i : len)
+        {
+            tot_len *= i;
+        }
+        string *init = new string[tot_len];
+        for (int i = 0; i < tot_len; ++i)
+        {
+            init[i] = "0";
+        }
+        dynamic_cast<InitValWithListAST *>(constinitval.get())->getInitVal(init, len);
+        string init_str = getInitList(init, len);
+
+        // name tag
+        string name_tag = "@" + ident + "_" + to_string(block_now);
+
+        // type tag
+        string type_tag = "i32";
+        int array_len = array_size_list.size();
+        for (int i = array_len - 1; i >= 0; i--)
+        {
+            type_tag = "[" + type_tag + ", " + to_string(array_size_list[i]->calc()) + "]";
+        }
+
+        if (is_global) // 全局常量
+        {
+            koopa_str += "global " + name_tag + " = alloc ";
+            koopa_str += type_tag + ", " + init_str + "\n";
+        }
+        else // 非全
+        {
+            koopa_str += "  " + name_tag + " = alloc " + type_tag + "\n";
+            initArray(name_tag, init, len);
+        }
         return make_pair(false, -1);
     }
 };
@@ -2008,11 +2246,30 @@ public:
             return make_pair(true, cur_var.val);
         }
         // 变量
-        else
+        else if (cur_var.type == VAR)
         {
             koopa_str += "  %" + to_string(reg_cnt) + " = load @" + ident + "_" + to_string(cur_var.name_index) + "\n";
             reg_cnt++;
             // !!!
+            return make_pair(false, -1);
+        }
+        else if (cur_var.type == ARRAY)
+        {
+            string array_ident = "@" + ident + "_" + to_string(cur_var.name_index);
+            koopa_str += "  %" + to_string(reg_cnt) + " = getelemptr " + array_ident + ", 0\n";
+            reg_cnt++;
+
+            return make_pair(false, -1);
+        }
+        else
+        {
+            // string array_ident = "@" + ident + "_" + to_string(cur_var.name_index);
+            // koopa_str += "  %" + to_string(reg_cnt) + " = getptr " + array_ident + ", 0\n";
+            // reg_cnt++;
+
+            string array_ident = "@" + ident + "_" + to_string(cur_var.name_index);
+            koopa_str += "  %" + to_string(reg_cnt) + " = load " + array_ident + "\n";
+            reg_cnt++;
             return make_pair(false, -1);
         }
     }
@@ -2020,6 +2277,304 @@ public:
     {
         Value cur_var = symbol_list.getSymbol(ident);
         return cur_var.val;
+    }
+};
+
+// lv9 unfinished
+// （右值）数组变量
+// Lval lv9 IDENT ArraySizeList 示例 c = a[2][5]
+class LValArrayAST : public BaseAST
+{
+public:
+    string ident;
+    vector<unique_ptr<BaseAST>> array_size_list;
+    void Dump() const override
+    {
+    }
+    pair<bool, int> Koopa() const override
+    {
+        Value lval = symbol_list.getSymbol(ident);
+        int len = array_size_list.size();
+        string array_ident = "@" + ident + "_" + to_string(lval.name_index);
+        // 数组
+        if (lval.type == ARRAY)
+        {
+            if (lval.val == len)
+            { // 读取一个数组项
+                for (int i = 0; i < len; i++)
+                {
+                    string array_index;
+                    int last_index = reg_cnt - 1;
+                    pair<bool, int> res = array_size_list[i]->Koopa();
+                    if (res.first)
+                    {
+                        array_index = to_string(res.second);
+                    }
+                    else
+                    {
+                        array_index = "%" + to_string(reg_cnt - 1);
+                    }
+
+                    if (i == 0)
+                    {
+                        koopa_str += "  %" + to_string(reg_cnt) + " = getelemptr ";
+                        koopa_str += array_ident + ", " + array_index + "\n";
+                    }
+                    else
+                    {
+                        koopa_str += "  %" + to_string(reg_cnt) + " = getelemptr ";
+                        koopa_str += "%" + to_string(last_index) + ", " + array_index + "\n";
+                    }
+
+                    reg_cnt++;
+                }
+                koopa_str += "  %" + to_string(reg_cnt) + " = load %" + to_string(reg_cnt - 1) + "\n";
+                reg_cnt++;
+                return make_pair(false, -1);
+            }
+            else // 读取一个部分解引用
+            {
+                for (int i = 0; i < len; i++)
+                {
+                    string array_index;
+                    int last_index = reg_cnt - 1;
+                    pair<bool, int> res = array_size_list[i]->Koopa();
+                    if (res.first)
+                    {
+                        array_index = to_string(res.second);
+                    }
+                    else
+                    {
+                        array_index = "%" + to_string(reg_cnt - 1);
+                    }
+
+                    if (i == 0)
+                    {
+                        koopa_str += "  %" + to_string(reg_cnt) + " = getelemptr ";
+                        koopa_str += array_ident + ", " + array_index + "\n";
+                    }
+                    else
+                    {
+                        koopa_str += "  %" + to_string(reg_cnt) + " = getelemptr ";
+                        koopa_str += "%" + to_string(last_index) + ", " + array_index + "\n";
+                    }
+
+                    reg_cnt++;
+                }
+
+                koopa_str += "  %" + to_string(reg_cnt) + " = getelemptr ";
+                if (array_size_list.size() == 0)
+                    koopa_str += array_ident;
+                else
+                    koopa_str += "%" + to_string(reg_cnt - 1);
+                koopa_str += ", 0\n";
+                reg_cnt++;
+
+                return make_pair(false, -1);
+            }
+        }
+        else if (lval.type == POINTER)
+        { // 指针（函数参数）
+            if (lval.val == len)
+            {
+                // step1 取出对应参数
+                koopa_str += "  %" + to_string(reg_cnt) + " = load " + array_ident + "\n";
+                reg_cnt++;
+
+                for (int i = 0; i < len; i++)
+                {
+                    string array_index;
+                    int last_index = reg_cnt - 1;
+                    pair<bool, int> res = array_size_list[i]->Koopa();
+                    if (res.first)
+                    {
+                        array_index = to_string(res.second);
+                    }
+                    else
+                    {
+                        array_index = "%" + to_string(reg_cnt - 1);
+                    }
+
+                    if (i == 0)
+                    {
+                        koopa_str += "  %" + to_string(reg_cnt) + " = getptr ";
+                        koopa_str += "%" + to_string(last_index) + ", " + array_index + "\n";
+                    }
+                    else
+                    {
+                        koopa_str += "  %" + to_string(reg_cnt) + " = getelemptr ";
+                        koopa_str += "%" + to_string(last_index) + ", " + array_index + "\n";
+                    }
+
+                    reg_cnt++;
+                }
+                koopa_str += "  %" + to_string(reg_cnt) + " = load %" + to_string(reg_cnt - 1) + "\n";
+                reg_cnt++;
+                return make_pair(false, -1);
+            }
+            else
+            {
+                // step1 取出对应参数
+                koopa_str += "  %" + to_string(reg_cnt) + " = load " + array_ident + "\n";
+                reg_cnt++;
+
+                for (int i = 0; i < len; i++)
+                {
+                    string array_index;
+                    int last_index = reg_cnt - 1;
+                    pair<bool, int> res = array_size_list[i]->Koopa();
+                    if (res.first)
+                    {
+                        array_index = to_string(res.second);
+                    }
+                    else
+                    {
+                        array_index = "%" + to_string(reg_cnt - 1);
+                    }
+
+                    if (i == 0)
+                    {
+                        koopa_str += "  %" + to_string(reg_cnt) + " = getptr ";
+                        koopa_str += "%" + to_string(last_index) + ", " + array_index + "\n";
+                    }
+                    else
+                    {
+                        koopa_str += "  %" + to_string(reg_cnt) + " = getelemptr ";
+                        koopa_str += "%" + to_string(last_index) + ", " + array_index + "\n";
+                    }
+
+                    reg_cnt++;
+                }
+
+                if (array_size_list.size() == 0)
+                {
+                    koopa_str += "  %" + to_string(reg_cnt) + " = getptr ";
+                    koopa_str += "%" + to_string(reg_cnt - 1) + ", 0\n";
+                }
+                else
+                {
+                    koopa_str += "  %" + to_string(reg_cnt) + " = getelemptr ";
+                    koopa_str += "%" + to_string(reg_cnt - 1) + ", 0\n";
+                }
+                reg_cnt++;
+                return make_pair(false, -1);
+            }
+        }
+        return make_pair(false, -1);
+    }
+};
+
+// Leval 左值变量 IDENT lv4
+class LeValAST : public BaseAST
+{
+public:
+    string ident;
+    void Dump() const override
+    {
+        cout << "LeVal { ";
+        cout << ident;
+        cout << " }";
+    }
+    pair<bool, int> Koopa() const override
+    {
+        // koopa_str += "store %" + to_string(reg_cnt - 1) + ", @" + ident + "\n";
+        return make_pair(false, -1);
+    }
+    string name() const override
+    {
+        Value var = symbol_list.getSymbol(ident);
+        return "@" + ident + "_" + to_string(var.name_index);
+    }
+};
+
+// lv9 unfinished
+// （左值）数组变量
+// lv9 IDENT ArraySizeList
+class LeValArrayAST : public BaseAST
+{
+public:
+    string ident;
+    vector<unique_ptr<BaseAST>> array_size_list;
+    void Dump() const override
+    {
+    }
+    pair<bool, int> Koopa() const override
+    {
+        return make_pair(false, -1);
+    }
+    string name() const override
+    {
+        Value var = symbol_list.getSymbol(ident);
+        string array_ident = "@" + ident + "_" + to_string(var.name_index);
+        if (var.type == ARRAY)
+        {
+            for (int i = 0; i < array_size_list.size(); i++)
+            {
+                int last_index = reg_cnt - 1;
+                string array_index;
+                pair<bool, int> res = array_size_list[i]->Koopa();
+
+                if (res.first)
+                {
+                    array_index = to_string(res.second);
+                }
+                else
+                {
+                    array_index = "%" + to_string(reg_cnt - 1);
+                }
+
+                if (i == 0)
+                {
+                    koopa_str += "  %" + to_string(reg_cnt) + " = getelemptr ";
+                    koopa_str += array_ident + ", " + array_index + "\n";
+                }
+                else
+                {
+                    koopa_str += "  %" + to_string(reg_cnt) + " = getelemptr ";
+                    koopa_str += "%" + to_string(last_index) + ", " + array_index + "\n";
+                }
+                reg_cnt++;
+            }
+            return "%" + to_string(reg_cnt - 1);
+        }
+        else if (var.type == POINTER)
+        {
+            koopa_str += "  %" + to_string(reg_cnt) + " = load " + array_ident + "\n";
+            reg_cnt++;
+
+            for (int i = 0; i < array_size_list.size(); i++)
+            {
+                string array_index;
+                int last_index = reg_cnt - 1;
+                pair<bool, int> res = array_size_list[i]->Koopa();
+                if (res.first)
+                {
+                    array_index = to_string(res.second);
+                }
+                else
+                {
+                    array_index = "%" + to_string(reg_cnt - 1);
+                }
+
+                if (i == 0)
+                {
+                    koopa_str += "  %" + to_string(reg_cnt) + " = getptr ";
+                    koopa_str += "%" + to_string(last_index) + ", " + array_index + "\n";
+                }
+                else
+                {
+                    koopa_str += "  %" + to_string(reg_cnt) + " = getelemptr ";
+                    koopa_str += "%" + to_string(last_index) + ", " + array_index + "\n";
+                }
+
+                reg_cnt++;
+            }
+            return "%" + to_string(reg_cnt - 1);
+        }
+        else
+        { // ???
+            return "%" + to_string(reg_cnt - 1);
+        }
     }
 };
 
@@ -2050,6 +2605,8 @@ public:
 
 // VarDef 变量定义 IDENT | IDENT "=" InitVal lv4
 // 变量名分配策略：在第index层基本块，变量命名为 ident_index
+// rule = 0 未初始化
+// rule = 1 初始化 = initval
 class VarDefAST : public BaseAST
 {
 public:
@@ -2072,6 +2629,7 @@ public:
         // 全局变量koopa
         if (is_global)
         {
+            // 初始化为0
             if (rule == 0)
             {
                 Value tmp(VAR, 0, block_now);
@@ -2098,6 +2656,7 @@ public:
         }
         else
         {
+            // 没有初始值
             if (rule == 0)
             {
                 // var_type[ident] = VAR;
@@ -2134,6 +2693,84 @@ public:
             }
             return make_pair(false, -1);
         }
+    }
+};
+
+// lv9 done
+// unfinished
+// 和ConstDefArray分外相似
+// 但初始化列表有可能是空的
+class VarDefArrayAST : public BaseAST
+{
+public:
+    int rule;
+    string ident;
+    unique_ptr<BaseAST> init_val;
+    vector<unique_ptr<BaseAST>> array_size_list;
+    void Dump() const override
+    {
+    }
+    pair<bool, int> Koopa() const override
+    {
+        vector<int> len;
+        for (auto &i : array_size_list)
+        {
+            len.push_back(i->calc());
+        }
+
+        int array_size = array_size_list.size();
+        Value var_array = Value(ARRAY, array_size, block_now);
+        // 数组放入符号表
+        symbol_list.addSymbol(ident, var_array);
+
+        // 处理初始化列表
+        // 先把所有初始值置为0
+        // 再根据constinitval的值来修改
+        int tot_len = 1;
+        for (auto i : len)
+        {
+            tot_len *= i;
+        }
+        string *init = new string[tot_len];
+        for (int i = 0; i < tot_len; ++i)
+        {
+            init[i] = "0";
+        }
+
+        // name tag
+        string name_tag = "@" + ident + "_" + to_string(block_now);
+
+        // type tag
+        string type_tag = "i32";
+        int array_len = array_size_list.size();
+        for (int i = array_len - 1; i >= 0; i--)
+        {
+            type_tag = "[" + type_tag + ", " + to_string(array_size_list[i]->calc()) + "]";
+        }
+
+        if (is_global)
+        {
+            if (init_val != nullptr) // 全局变量 有初值
+            {
+                dynamic_cast<InitValWithListAST *>(init_val.get())->getInitVal(init, len);
+            }
+            string init_str = getInitList(init, len);
+            koopa_str += "global " + name_tag + " = alloc ";
+            koopa_str += type_tag + ", " + init_str + "\n";
+        }
+        else
+        {
+            koopa_str += "  " + name_tag + " = alloc " + type_tag + "\n";
+            if (init_val == nullptr) // 局部变量 不用初始化就直接返回
+            {
+                return make_pair(false, -1);
+            }
+            dynamic_cast<InitValWithListAST *>(init_val.get())->getInitVal(init, len);
+            string init_str = getInitList(init, len);
+            initArray(name_tag, init, len);
+        }
+
+        return make_pair(false, -1);
     }
 };
 

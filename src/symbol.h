@@ -15,7 +15,9 @@ enum TYPE
 {
     CONSTANT,
     VAR,
-    FUNC
+    FUNC,
+    ARRAY,
+    POINTER
 };
 
 // 符号对应的值
