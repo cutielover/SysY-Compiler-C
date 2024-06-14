@@ -2034,7 +2034,7 @@ public:
     }
     pair<bool, int> Koopa() const override
     {
-        int val = (constinitval->Koopa()).second;
+        int val = constinitval->calc();
         Value tmp(CONSTANT, val, block_now);
         symbol_list.addSymbol(ident, tmp);
 
