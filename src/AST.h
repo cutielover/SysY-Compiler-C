@@ -37,12 +37,6 @@ static bool is_global = true;
 
 extern SymbolList symbol_list;
 
-/**
- * 完成对Local数组初始化的IR生成
- * @param name_: 数组在Koopa IR中的名字
- * @param ptr: 指向数组的内容，例如{"1", "%2"}
- * @param len: 描述数组类型，i.e. 各个维度的长
- */
 static void initArray(std::string name_, std::string *ptr, const std::vector<int> &len)
 {
     int n = len[0];
@@ -144,7 +138,7 @@ public:
     {
         // 符号表++
         symbol_list.newMap();
-
+        block_end.push_back(false);
         // 库函数声明
         koopa_str += "decl @getint(): i32\ndecl @getch() : i32\ndecl @getarray(*i32) : i32\n";
         koopa_str += "decl @putint(i32)\ndecl @putch(i32)\ndecl @putarray(i32, *i32)\n";
@@ -515,7 +509,28 @@ public:
         // 修改：将当前块正式修改为block_cnt
         // 记录：设置当前块为未完结的
         block_end.push_back(false);
-
+        // koopa_str += "block_end[" + to_string(block_now) + "]" + " = ";
+        // if (block_end[block_now])
+        // {
+        //     koopa_str += "true\n";
+        //     koopa_str += to_string(block_end.size()) + "\n";
+        //     for (int i = 0; i < block_end.size(); i++)
+        //     {
+        //         koopa_str += "block_end[" + to_string(i) + "]" + " = ";
+        //         if (block_end[i])
+        //         {
+        //             koopa_str += "true\n";
+        //         }
+        //         else
+        //         {
+        //             koopa_str += "false\n";
+        //         }
+        //     }
+        // }
+        // else
+        // {
+        //     koopa_str += "false\n";
+        // }
         // 参数加入符号表
         // lv9 update: 数组指针
         for (int i = 0; i < function_params.size(); i++)
@@ -535,15 +550,17 @@ public:
 
         function_params.clear();
 
-        for (auto &i : blockItemList)
+        // koopa_str += "!!!!!!!!!!!block: " + to_string(block_now) + "!!!!!!!!!!!!\n";
+
+        for (int i = 0; i < blockItemList.size(); i++)
         {
             if (block_end[block_now])
             {
                 // koopa_str += "\n";
-                // koopa_str += "Block" + to_string(block_now) + " end, Stop Process BlockItem\n\n";
+                // koopa_str += "Block" + to_string(block_now) + " end, i = " + to_string(i) + "\n\n";
                 break;
             }
-            i->Koopa();
+            blockItemList[i]->Koopa();
         }
 
         // 处理if{}的情况
@@ -1986,6 +2003,10 @@ public:
         {
             i->Koopa();
         }
+        // koopa_str += "the size of block_end is " + to_string(block_end.size()) + "\n";
+        // koopa_str += "block_now is " + to_string(block_now) + "\n";
+        // if (!is_global)
+        //     block_end[block_now] = false;
         return make_pair(false, -1);
     }
 };
@@ -2266,7 +2287,6 @@ public:
             // string array_ident = "@" + ident + "_" + to_string(cur_var.name_index);
             // koopa_str += "  %" + to_string(reg_cnt) + " = getptr " + array_ident + ", 0\n";
             // reg_cnt++;
-
             string array_ident = "@" + ident + "_" + to_string(cur_var.name_index);
             koopa_str += "  %" + to_string(reg_cnt) + " = load " + array_ident + "\n";
             reg_cnt++;
@@ -2599,6 +2619,9 @@ public:
         {
             i->Koopa();
         }
+        // block_end[block_now] = false;
+        // if (!is_global)
+        //     block_end[block_now] = false;
         return make_pair(false, -1);
     }
 };
