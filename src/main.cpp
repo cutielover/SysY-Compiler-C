@@ -48,9 +48,10 @@ int main(int argc, const char *argv[])
   // if (ast)
   //   ast->Dump();
   ast->Koopa();
+
   if (!strcmp(mode, "-koopa"))
     cout << koopa_str << endl;
-  else if (!strcmp(mode, "-riscv"))
+  else
     parse_raw_program(koopa_str.c_str());
   return 0;
 }
