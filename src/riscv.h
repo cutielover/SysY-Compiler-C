@@ -29,8 +29,16 @@ void Visit(const koopa_raw_jump_t &jump);
 void Visit(const koopa_raw_call_t &call, const koopa_raw_value_t &value);
 void Visit(const koopa_raw_global_alloc_t &global, const koopa_raw_value_t &value);
 
+// lv9
+// 访问 getptr 指令
+void Visit(const koopa_raw_get_ptr_t &get_ptr, const koopa_raw_value_t &value);
+// 访问 getelemptr 指令
+void Visit(const koopa_raw_get_elem_ptr_t &get_elem_ptr, const koopa_raw_value_t &value);
+void Visit(const koopa_raw_aggregate_t &aggregate);
+
 void parse_raw_program(const char *str);
 
 int cal_func_size(const koopa_raw_function_t &func);
 int cal_basic_block_size(const koopa_raw_basic_block_t &bb);
 int cal_inst_size(const koopa_raw_value_t &inst);
+int cal_type_size(const koopa_raw_type_t &ty);
