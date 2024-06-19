@@ -569,6 +569,8 @@ public:
             // else tag:
             koopa_str += else_tag + ":\n";
 
+            block_handler.set_not_end();
+
             else_stmt->Koopa();
 
             bool else_stmt_end = block_handler.is_end();
