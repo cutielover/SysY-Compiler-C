@@ -52,7 +52,7 @@ using namespace std;
 // 非终结符的类型定义
 %type <ast_val> FuncDef Block Stmt If
 %type <ast_val> Exp PrimaryExp UnaryExp AddExp MulExp LOrExp LAndExp EqExp RelExp
-%type <ast_val> Decl ConstDecl ConstDef ConstDefList ConstInitVal BlockItem LVal ConstExp LeVal BlockItemList VarDecl VarDef InitVal VarDefList
+%type <ast_val> Decl ConstDecl ConstDef ConstDefList BlockItem LVal LeVal BlockItemList VarDecl VarDef InitVal VarDefList
 %type <int_val> Number
 %type <ast_deq> DefList
 %type <ast_val> FuncFParams FuncFParam FuncRParams
@@ -624,23 +624,7 @@ ConstDef
   }
   ;
 
-// lv9 remove
-ConstInitVal
-  : Exp {
-    auto ast = new ConstInitValAST();
-    ast->constexp = unique_ptr<BaseAST>($1);
-    $$ = ast;
-  } 
-  ;
 
-// lv9 remove
-ConstExp
-  : Exp {
-    auto ast = new ConstExpAST();
-    ast->exp = unique_ptr<BaseAST>($1);
-    $$ = ast;
-  }
-  ;
 
 
 LVal 

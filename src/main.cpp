@@ -16,6 +16,7 @@ int reg_cnt = 0;
 int if_cnt = 0;
 
 SymbolList symbol_list;
+BlockHandler block_handler = BlockHandler();
 
 // 声明 lexer 的输入, 以及 parser 函数
 // 为什么不引用 sysy.tab.hpp 呢? 因为首先里面没有 yyin 的定义
@@ -44,9 +45,7 @@ int main(int argc, const char *argv[])
   assert(!ret);
 
   freopen(output, "w", stdout);
-  // 输出解析得到的 AST, 其实就是个字符串
-  // if (ast)
-  //   ast->Dump();
+
   ast->Koopa();
 
   if (!strcmp(mode, "-koopa"))

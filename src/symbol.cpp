@@ -1,16 +1,14 @@
-#include <unordered_map>
+
 #include "symbol.h"
 
 void SymbolList::newMap()
 {
     symbol_list_array.push_back(unordered_map<string, Value>());
-    index++;
 }
 
 void SymbolList::deleteMap()
 {
     symbol_list_array.pop_back();
-    index--;
 }
 
 void SymbolList::addSymbol(string name, Value value)

@@ -15,11 +15,7 @@ extern int reg_cnt;
 extern int if_cnt;
 
 // 警惕使用全局变量
-static int block_cnt;
-static int block_now;
 static int logical;
-static vector<bool> block_end;
-static unordered_map<int, int> block_parent;
 
 // lv7 while
 static int loop_cnt;
@@ -36,6 +32,7 @@ static vector<pair<string, int>> function_params; // 记录函数的形参，用
 static bool is_global = true;
 
 extern SymbolList symbol_list;
+extern BlockHandler block_handler;
 
 static void initArray(std::string name_, std::string *ptr, const std::vector<int> &len)
 {
@@ -101,8 +98,6 @@ class BaseAST
 public:
     virtual ~BaseAST() = default;
 
-    virtual void Dump() const = 0;
-    // !!!
     // 用于优化，对于能直接计算出值的表达式，直接返回值，减少寄存器浪费
     // bool: true-能计算 false-不能
     // int: 能计算出的值；对于不能计算出的值，返回-1
@@ -123,22 +118,12 @@ public:
     unique_ptr<deque<unique_ptr<BaseAST>>> DefList;
     int func_num;
 
-    void Dump() const override
-    {
-        cout << "CompUnitAST { ";
-        for (const auto &i : *DefList)
-        {
-            i->Dump();
-            cout << ", ";
-        }
-        cout << " }";
-    }
-
     pair<bool, int> Koopa() const override
     {
-        // 符号表++
+        // 全局符号表
         symbol_list.newMap();
-        block_end.push_back(false);
+
+        // block_end.push_back(false);
         // 库函数声明
         koopa_str += "decl @getint(): i32\ndecl @getch() : i32\ndecl @getarray(*i32) : i32\n";
         koopa_str += "decl @putint(i32)\ndecl @putch(i32)\ndecl @putarray(i32, *i32)\n";
@@ -162,7 +147,6 @@ public:
             if (n == func_num)
                 break;
             ((*DefList)[i])->Koopa();
-            // koopa_str += "\n";
         }
 
         koopa_str += "\n";
@@ -172,6 +156,8 @@ public:
         {
             ((*DefList)[i])->Koopa();
         }
+
+        symbol_list.deleteMap();
 
         return make_pair(false, -1);
     }
@@ -185,15 +171,6 @@ public:
     string type;
     string ident;
     unique_ptr<BaseAST> block;
-
-    void Dump() const override
-    {
-        cout << "FuncDefAST { ";
-        cout << type;
-        cout << ", " << ident << ", ";
-        block->Dump();
-        cout << " }";
-    }
 
     pair<bool, int> Koopa() const override
     {
@@ -229,7 +206,7 @@ public:
 
         block->Koopa();
 
-        if (!block_end[block_now])
+        if (!block_handler.is_end())
         {
             if (type == "int")
                 koopa_str += "  ret 0\n";
@@ -256,18 +233,6 @@ public:
     unique_ptr<BaseAST> funcfparams;
     unique_ptr<BaseAST> block;
 
-    void Dump() const override
-    {
-        cout << "FuncDefWithParamsAST { ";
-        cout << type;
-        cout << ", " << ident << ", ";
-        cout << " ( ";
-        funcfparams->Dump();
-        cout << " ) ";
-        block->Dump();
-        cout << " }";
-    }
-
     pair<bool, int> Koopa() const override
     {
         is_global = false;
@@ -291,8 +256,6 @@ public:
 
         koopa_str += ")";
 
-        // func_type->Koopa();
-
         if (type == "int")
         {
             koopa_str += ": i32 ";
@@ -312,7 +275,7 @@ public:
 
         block->Koopa();
 
-        if (!block_end[block_now])
+        if (!block_handler.is_end())
         {
             if (type == "int")
                 koopa_str += "  ret 0\n";
@@ -333,16 +296,7 @@ class FuncFParamsAST : public BaseAST
 {
 public:
     vector<unique_ptr<BaseAST>> ParamList;
-    void Dump() const override
-    {
-        cout << "FuncFParamsAST { ";
-        for (auto &i : ParamList)
-        {
-            i->Dump();
-            cout << ", ";
-        }
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         bool params = false;
@@ -359,7 +313,6 @@ public:
     }
 };
 
-/////////////////////////////////////////////////////////////////////////////////////////////////
 // lv9 update
 // FuncFParam
 // INT IDENT
@@ -369,12 +322,7 @@ public:
     string type;
     string name_;
     vector<unique_ptr<BaseAST>> array_size_list;
-    void Dump() const override
-    {
-        cout << "FuncFParamAST { ";
-        cout << type << ": @" << name_;
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         // 声明参数
@@ -382,12 +330,12 @@ public:
         {
             if (type == "int")
             {
-                string param_tag = "@" + name_ + "_" + to_string(block_cnt + 1) + "_param";
+                string param_tag = "@" + name_ + "_" + to_string(block_handler.block_cnt + 1) + "_param";
                 koopa_str += param_tag + ": i32";
             }
             else if (type == "array")
             {
-                string param_tag = "@" + name_ + "_" + to_string(block_cnt + 1) + "_param";
+                string param_tag = "@" + name_ + "_" + to_string(block_handler.block_cnt + 1) + "_param";
                 koopa_str += param_tag + ": ";
 
                 string type_tag = "i32";
@@ -404,8 +352,8 @@ public:
         {
             if (type == "int")
             {
-                string param_tag = "@" + name_ + "_" + to_string(block_cnt + 1) + "_param";
-                string use_tag = "@" + name_ + "_" + to_string(block_cnt + 1);
+                string param_tag = "@" + name_ + "_" + to_string(block_handler.block_cnt + 1) + "_param";
+                string use_tag = "@" + name_ + "_" + to_string(block_handler.block_cnt + 1);
                 koopa_str += "  " + use_tag + " = alloc i32\n";
                 koopa_str += "  store " + param_tag + ", " + use_tag + "\n";
                 function_params.emplace_back(make_pair(name_, 0));
@@ -418,8 +366,8 @@ public:
                 {
                     type_tag = "[" + type_tag + ", " + to_string(array_size_list[i]->calc()) + "]";
                 }
-                string param_tag = "@" + name_ + "_" + to_string(block_cnt + 1) + "_param";
-                string use_tag = "@" + name_ + "_" + to_string(block_cnt + 1);
+                string param_tag = "@" + name_ + "_" + to_string(block_handler.block_cnt + 1) + "_param";
+                string use_tag = "@" + name_ + "_" + to_string(block_handler.block_cnt + 1);
 
                 koopa_str += "  " + use_tag + " = alloc *" + type_tag + "\n";
                 koopa_str += "  store " + param_tag + ", " + use_tag + "\n";
@@ -444,15 +392,7 @@ class FuncRParamsAST : public BaseAST
 {
 public:
     vector<unique_ptr<BaseAST>> ParamList;
-    void Dump() const override
-    {
-        cout << "FuncRParamsAST { ";
-        for (auto &i : ParamList)
-        {
-            i->Dump();
-        }
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         return make_pair(false, -1);
@@ -484,95 +424,48 @@ class BlockAST : public BaseAST
 public:
     vector<unique_ptr<BaseAST>> blockItemList;
 
-    void Dump() const override
-    {
-        cout << "BlockAST { ";
-        for (auto &i : blockItemList)
-        {
-            i->Dump();
-            cout << ", ";
-        }
-        cout << " }";
-    }
-
     pair<bool, int> Koopa() const override
     {
         symbol_list.newMap();
 
-        // 块计数：当前块为修改后的block_cnt
-        block_cnt++;
-        int parent_block = block_now;
-        // 记录：当前块的父亲为block_last（即上一个执行的块）
-        // 边界：起始block_cnt为1，block_now为0
-        block_now = block_cnt;
-        block_parent[block_now] = parent_block;
-        // 修改：将当前块正式修改为block_cnt
-        // 记录：设置当前块为未完结的
-        block_end.push_back(false);
-        // koopa_str += "block_end[" + to_string(block_now) + "]" + " = ";
-        // if (block_end[block_now])
-        // {
-        //     koopa_str += "true\n";
-        //     koopa_str += to_string(block_end.size()) + "\n";
-        //     for (int i = 0; i < block_end.size(); i++)
-        //     {
-        //         koopa_str += "block_end[" + to_string(i) + "]" + " = ";
-        //         if (block_end[i])
-        //         {
-        //             koopa_str += "true\n";
-        //         }
-        //         else
-        //         {
-        //             koopa_str += "false\n";
-        //         }
-        //     }
-        // }
-        // else
-        // {
-        //     koopa_str += "false\n";
-        // }
+        block_handler.addBlock();
+
         // 参数加入符号表
         // lv9 update: 数组指针
         for (int i = 0; i < function_params.size(); i++)
         {
             if (function_params[i].second == 0)
             {
-                Value param = Value(VAR, 0, block_now);
+                Value param = Value(VAR, 0, block_handler.block_now.index);
                 symbol_list.addSymbol(function_params[i].first, param);
             }
             else
             {
                 // 指针的val是[]的数量，例：如果参数是a[]，则val记为1
-                Value param = Value(POINTER, function_params[i].second, block_now);
+                Value param = Value(POINTER, function_params[i].second, block_handler.block_now.index);
                 symbol_list.addSymbol(function_params[i].first, param);
             }
         }
 
         function_params.clear();
 
-        // koopa_str += "!!!!!!!!!!!block: " + to_string(block_now) + "!!!!!!!!!!!!\n";
-
         for (int i = 0; i < blockItemList.size(); i++)
         {
-            if (block_end[block_now])
+            if (block_handler.is_end())
             {
-                // koopa_str += "\n";
-                // koopa_str += "Block" + to_string(block_now) + " end, i = " + to_string(i) + "\n\n";
                 break;
             }
+
             blockItemList[i]->Koopa();
         }
 
-        // 处理if{}的情况
-        // if (parent_block != 0)
-        block_end[parent_block] = block_end[block_now];
-
         // 子块完成后，归位block_last
-        block_now = block_parent[block_now];
+        block_handler.leaveBlock();
 
         symbol_list.deleteMap();
 
-        return make_pair(false, -1);
+        // 返回当前基本块的序号
+        return make_pair(true, block_handler.block_cnt);
     }
 };
 
@@ -585,32 +478,6 @@ public:
     unique_ptr<BaseAST> exp;
     unique_ptr<BaseAST> leval;
     unique_ptr<BaseAST> block;
-
-    void Dump() const override
-    {
-        cout << "StmtAST { ";
-        if (rule == 0)
-        {
-            leval->Dump();
-            exp->Dump();
-        }
-        else if (rule == 1)
-        {
-            cout << "return ";
-            exp->Dump();
-        }
-        else if (rule == 2)
-        {
-            cout << "exp ";
-            exp->Dump();
-        }
-        else if (rule == 3)
-        {
-            cout << "block ";
-            block->Dump();
-        }
-        cout << "; }";
-    }
 
     pair<bool, int> Koopa() const override
     {
@@ -626,7 +493,8 @@ public:
             {
                 koopa_str += "  store %" + to_string(reg_cnt - 1) + ", " + val_name + "\n";
             }
-            block_end[block_now] = false;
+
+            block_handler.set_not_end();
         }
         else if (rule == 1)
         {
@@ -646,19 +514,19 @@ public:
             { //?
                 koopa_str += "  ret\n";
             }
-            // koopa_str += "Ret: Block" + to_string(block_now) + "\n";
-            block_end[block_now] = true;
-            // re = true;
+
+            block_handler.set_end();
         }
         else if (rule == 2)
         {
             if (exp != nullptr)
                 exp->Koopa();
-            block_end[block_now] = false;
+
+            block_handler.set_not_end();
         }
         else if (rule == 3)
         {
-            block->Koopa();
+            return block->Koopa();
         }
         return make_pair(false, -1);
     }
@@ -671,12 +539,7 @@ class IfStmtAST : public BaseAST
 public:
     unique_ptr<BaseAST> if_stmt;
     unique_ptr<BaseAST> else_stmt;
-    void Dump() const override
-    {
-        cout << "IfStmtAST { ";
-        if_stmt->Dump();
-        cout << "; }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         if_cnt++;
@@ -684,54 +547,50 @@ public:
         // If
         if (else_stmt == nullptr)
         {
-            // 说明if的结尾是end
             if_end = true;
             if_stmt->Koopa();
-            // now_if_cnt = if_cnt;
             string end_tag = "%end_" + to_string(now_if_cnt);
             koopa_str += end_tag + ":\n";
-            // if条件语句不能意味着结束
-            block_end[block_now] = false;
+
+            block_handler.set_not_end();
         }
         // If ELSE Stmt
         else
         {
             if_end = false;
 
-            if_stmt->Koopa();
-            bool if_stmt_end = block_end[block_now];
+            pair<bool, int> res_if = if_stmt->Koopa();
 
-            // now_if_cnt = if_cnt;
+            bool if_stmt_end = res_if.second == 1 ? true : false;
+
             string end_tag = "%end_" + to_string(now_if_cnt);
             string else_tag = "%else_" + to_string(now_if_cnt);
 
             // else tag:
             koopa_str += else_tag + ":\n";
 
-            block_end[block_now] = false;
-
             else_stmt->Koopa();
-            bool else_stmt_end = block_end[block_now];
+
+            bool else_stmt_end = block_handler.is_end();
 
             end_tag = "%end_" + to_string(now_if_cnt);
 
             if (!else_stmt_end)
             {
-                // cout << end_tag << " jump at line 358" << endl;
                 koopa_str += "  jump " + end_tag + "\n\n";
             }
 
             if (if_stmt_end && else_stmt_end)
             {
-                block_end[block_now] = true;
+                block_handler.set_end();
             }
             else
             {
-                block_end[block_now] = false;
+                block_handler.set_not_end();
                 koopa_str += end_tag + ":\n";
             }
         }
-        // if_cnt--;
+
         return make_pair(false, -1);
     }
 };
@@ -744,15 +603,7 @@ class IfAST : public BaseAST
 public:
     unique_ptr<BaseAST> exp;
     unique_ptr<BaseAST> stmt;
-    void Dump() const override
-    {
-        cout << "IfAST { ";
-        cout << "if ( ";
-        exp->Dump();
-        cout << " ) ";
-        stmt->Dump();
-        cout << "; }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         pair<bool, int> res = exp->Koopa();
@@ -787,14 +638,18 @@ public:
 
         stmt->Koopa();
 
-        if (!block_end[block_now])
+        bool end_now = block_handler.is_end();
+
+        int is_end = 1;
+        if (!end_now)
         {
+            is_end = -1;
             koopa_str += "  jump " + end_tag + "\n\n";
         }
         // end of if branch
         // koopa_str += end_tag + ":\n";
 
-        return make_pair(false, -1);
+        return make_pair(false, is_end);
     }
 };
 
@@ -806,13 +661,7 @@ class WhileAST : public BaseAST
 public:
     unique_ptr<BaseAST> exp;
     unique_ptr<BaseAST> stmt;
-    void Dump() const override
-    {
-        cout << "WhilesStmt { ";
-        exp->Dump();
-        stmt->Dump();
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         loop_cnt++;
@@ -840,7 +689,7 @@ public:
 
         stmt->Koopa();
 
-        if (!block_end[block_now])
+        if (!block_handler.is_end())
         {
             koopa_str += "  jump " + entry_name + "\n\n";
         }
@@ -849,7 +698,7 @@ public:
 
         loop_dep--;
 
-        block_end[block_now] = false;
+        block_handler.set_not_end();
 
         return make_pair(false, -1);
     }
@@ -863,17 +712,7 @@ class LoopJumpAST : public BaseAST
 {
 public:
     int rule;
-    void Dump() const override
-    {
-        if (rule == 0)
-        {
-            cout << "break";
-        }
-        else
-        {
-            cout << "continue";
-        }
-    }
+
     pair<bool, int> Koopa() const override
     {
         int tag = find_loop[loop_dep];
@@ -881,16 +720,18 @@ public:
         if (rule == 0)
         {
             string end_name = "%while_end_" + to_string(tag);
-            if (!block_end[block_now])
+            if (!block_handler.is_end())
                 koopa_str += "  jump " + end_name + "\n\n";
-            block_end[block_now] = true;
+
+            block_handler.set_end();
         }
         else
         {
             string entry_name = "%while_entry_" + to_string(tag);
-            if (!block_end[block_now])
+            if (!block_handler.is_end())
                 koopa_str += "  jump " + entry_name + "\n\n";
-            block_end[block_now] = true;
+
+            block_handler.set_end();
         }
 
         return make_pair(false, -1);
@@ -903,12 +744,7 @@ class ExpAST : public BaseAST
 {
 public:
     unique_ptr<BaseAST> lorexp;
-    void Dump() const override
-    {
-        cout << "Exp { ";
-        lorexp->Dump();
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         return lorexp->Koopa();
@@ -928,23 +764,7 @@ public:
     int number;
     unique_ptr<BaseAST> exp;
     unique_ptr<BaseAST> lval;
-    void Dump() const override
-    {
-        cout << "PrimaryExp { ";
-        if (rule == 0)
-        {
-            exp->Dump();
-        }
-        else if (rule == 1)
-        {
-            cout << number;
-        }
-        else
-        {
-            lval->Dump();
-        }
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         if (rule == 0)
@@ -986,20 +806,7 @@ public:
     string op;
     unique_ptr<BaseAST> primaryexp;
     unique_ptr<BaseAST> unaryexp;
-    void Dump() const override
-    {
-        cout << "UnaryExp { ";
-        if (rule == 0)
-        {
-            primaryexp->Dump();
-        }
-        else
-        {
-            cout << op << " ";
-            unaryexp->Dump();
-        }
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         if (rule == 0)
@@ -1080,16 +887,7 @@ class UnaryExpWithFuncAST : public BaseAST
 public:
     string ident;
     unique_ptr<BaseAST> funcrparams;
-    void Dump() const override
-    {
-        cout << "UnaryExpWithFuncAST { ";
-        cout << "{call " << ident << "} ";
-        if (funcrparams)
-        {
-            funcrparams->Dump();
-        }
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         Value func = symbol_list.getSymbol(ident);
@@ -1149,21 +947,7 @@ public:
     string op;
     unique_ptr<BaseAST> mulexp;
     unique_ptr<BaseAST> unaryexp;
-    void Dump() const override
-    {
-        cout << "MulExp { ";
-        if (rule == 0)
-        {
-            unaryexp->Dump();
-        }
-        else
-        {
-            mulexp->Dump();
-            cout << op << " ";
-            unaryexp->Dump();
-        }
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         if (rule == 0)
@@ -1303,21 +1087,7 @@ public:
     string op;
     unique_ptr<BaseAST> mulexp;
     unique_ptr<BaseAST> addexp;
-    void Dump() const override
-    {
-        cout << "AddExp { ";
-        if (rule == 0)
-        {
-            mulexp->Dump();
-        }
-        else
-        {
-            addexp->Dump();
-            cout << op << " ";
-            mulexp->Dump();
-        }
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         if (rule == 0)
@@ -1426,21 +1196,7 @@ public:
     string op;
     unique_ptr<BaseAST> addexp;
     unique_ptr<BaseAST> relexp;
-    void Dump() const override
-    {
-        cout << "RelExp { ";
-        if (rule == 0)
-        {
-            addexp->Dump();
-        }
-        else
-        {
-            relexp->Dump();
-            cout << op << " ";
-            addexp->Dump();
-        }
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         if (rule == 0)
@@ -1611,21 +1367,6 @@ public:
     unique_ptr<BaseAST> relexp;
     unique_ptr<BaseAST> eqexp;
 
-    void Dump() const override
-    {
-        cout << "EqExp { ";
-        if (rule == 0)
-        {
-            relexp->Dump();
-        }
-        else
-        {
-            eqexp->Dump();
-            cout << op << " ";
-            relexp->Dump();
-        }
-        cout << " }";
-    }
     pair<bool, int> Koopa() const override
     {
         if (rule == 0)
@@ -1737,21 +1478,6 @@ public:
     unique_ptr<BaseAST> eqexp;
     unique_ptr<BaseAST> landexp;
 
-    void Dump() const override
-    {
-        cout << "LAndExp { ";
-        if (rule == 0)
-        {
-            eqexp->Dump();
-        }
-        else
-        {
-            landexp->Dump();
-            cout << "&&" << " ";
-            eqexp->Dump();
-        }
-        cout << " }";
-    }
     pair<bool, int> Koopa() const override
     {
         if (rule == 0)
@@ -1850,21 +1576,7 @@ public:
     int rule;
     unique_ptr<BaseAST> landexp;
     unique_ptr<BaseAST> lorexp;
-    void Dump() const override
-    {
-        cout << "LOrExp { ";
-        if (rule == 0)
-        {
-            landexp->Dump();
-        }
-        else
-        {
-            lorexp->Dump();
-            cout << "||" << " ";
-            landexp->Dump();
-        }
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         if (rule == 0)
@@ -1955,19 +1667,7 @@ public:
     int rule;
     unique_ptr<BaseAST> constdecl;
     unique_ptr<BaseAST> vardecl;
-    void Dump() const override
-    {
-        cout << "Decl { ";
-        if (rule == 0)
-        {
-            constdecl->Dump();
-        }
-        else
-        {
-            vardecl->Dump();
-        }
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         if (rule == 0)
@@ -1987,35 +1687,16 @@ class ConstDeclAST : public BaseAST
 {
 public:
     vector<unique_ptr<BaseAST>> constDefList;
-    void Dump() const override
-    {
-        cout << "ConstDecl { ";
-        for (auto &i : constDefList)
-        {
-            i->Dump();
-            cout << ",";
-        }
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         for (auto &i : constDefList)
         {
             i->Koopa();
         }
-        // koopa_str += "the size of block_end is " + to_string(block_end.size()) + "\n";
-        // koopa_str += "block_now is " + to_string(block_now) + "\n";
-        // if (!is_global)
-        //     block_end[block_now] = false;
+
         return make_pair(false, -1);
     }
-};
-
-// Btype 目前只有“INT”一种类型，暂略 lv4
-class BtypeAST : public BaseAST
-{
-public:
-    void Dump() const override {}
 };
 
 // ConstDef 常量定义 IDENT "=" ConstInitVal lv4
@@ -2025,35 +1706,23 @@ class ConstDefAST : public BaseAST
 public:
     string ident;
     unique_ptr<BaseAST> constinitval; // InitValAST
-    void Dump() const override
-    {
-        cout << "ConstDef { ";
-        cout << ident << " = ";
-        constinitval->Dump();
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         int val = constinitval->calc();
-        Value tmp(CONSTANT, val, block_now);
+        Value tmp(CONSTANT, val, block_handler.block_now.index);
         symbol_list.addSymbol(ident, tmp);
 
-        // var_type[ident] = CONSTANT;
-        // // var_val[ident] = constinitval->cal_value();
-        // var_val[ident] = (constinitval->Koopa()).second;
         return make_pair(false, -1);
     }
 };
 
 // lv9 done
-// 存疑
 class InitValWithListAST : public BaseAST
 {
 public:
     vector<unique_ptr<BaseAST>> init_val_list;
-    void Dump() const override
-    {
-    }
+
     pair<bool, int> Koopa() const override
     {
         return make_pair(false, -1);
@@ -2095,7 +1764,6 @@ public:
             }
             else
             {
-                assert(n > 1);
                 int j = n - 1;
                 if (i == 0)
                 {
@@ -2109,7 +1777,6 @@ public:
                         if (i % width[j] != 0)
                             break;
                     }
-                    assert(j < n - 1);
                     ++j;
                 }
                 dynamic_cast<InitValWithListAST *>(init_val.get())->getInitVal(ptr + i, vector<int>(len.begin() + j, len.end()));
@@ -2122,7 +1789,6 @@ public:
 };
 
 // lv9 done
-// unfinished
 // 示例 const int a[10] = {1, 2, 3, 4, 5};
 // 注意不能够像int常量一样直接存入符号表
 // 必须体现在IR当中
@@ -2132,9 +1798,6 @@ public:
     string ident;
     unique_ptr<BaseAST> constinitval; // InitValWithListAST 列表
     vector<unique_ptr<BaseAST>> array_size_list;
-    void Dump() const override
-    {
-    }
     pair<bool, int> Koopa() const override
     {
         vector<int> len;
@@ -2143,7 +1806,7 @@ public:
             len.push_back(i->calc());
         }
         int array_size = array_size_list.size();
-        Value const_array = Value(ARRAY, array_size, block_now);
+        Value const_array = Value(ARRAY, array_size, block_handler.block_now.index);
         // 数组放入符号表
         symbol_list.addSymbol(ident, const_array);
 
@@ -2164,7 +1827,7 @@ public:
         string init_str = getInitList(init, len);
 
         // name tag
-        string name_tag = "@" + ident + "_" + to_string(block_now);
+        string name_tag = "@" + ident + "_" + to_string(block_handler.block_now.index);
 
         // type tag
         string type_tag = "i32";
@@ -2193,12 +1856,7 @@ class ConstInitValAST : public BaseAST
 {
 public:
     unique_ptr<BaseAST> constexp;
-    void Dump() const override
-    {
-        cout << "ConstInitVal { ";
-        constexp->Dump();
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         return constexp->Koopa();
@@ -2210,12 +1868,7 @@ class ConstExpAST : public BaseAST
 {
 public:
     unique_ptr<BaseAST> exp;
-    void Dump() const override
-    {
-        cout << "ConstExp { ";
-        exp->Dump();
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         return exp->Koopa();
@@ -2229,15 +1882,7 @@ public:
     int rule;
     unique_ptr<BaseAST> decl;
     unique_ptr<BaseAST> stmt;
-    void Dump() const override
-    {
-        cout << "BlockItem { ";
-        if (rule == 0)
-            decl->Dump();
-        else
-            stmt->Dump();
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         if (rule == 0)
@@ -2252,12 +1897,7 @@ class LValAST : public BaseAST
 {
 public:
     string ident;
-    void Dump() const override
-    {
-        cout << "LVal { ";
-        cout << ident;
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         Value cur_var = symbol_list.getSymbol(ident);
@@ -2308,9 +1948,7 @@ class LValArrayAST : public BaseAST
 public:
     string ident;
     vector<unique_ptr<BaseAST>> array_size_list;
-    void Dump() const override
-    {
-    }
+
     pair<bool, int> Koopa() const override
     {
         Value lval = symbol_list.getSymbol(ident);
@@ -2489,12 +2127,7 @@ class LeValAST : public BaseAST
 {
 public:
     string ident;
-    void Dump() const override
-    {
-        cout << "LeVal { ";
-        cout << ident;
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         // koopa_str += "store %" + to_string(reg_cnt - 1) + ", @" + ident + "\n";
@@ -2515,9 +2148,7 @@ class LeValArrayAST : public BaseAST
 public:
     string ident;
     vector<unique_ptr<BaseAST>> array_size_list;
-    void Dump() const override
-    {
-    }
+
     pair<bool, int> Koopa() const override
     {
         return make_pair(false, -1);
@@ -2603,25 +2234,14 @@ class VarDeclAST : public BaseAST
 {
 public:
     vector<unique_ptr<BaseAST>> varDefList;
-    void Dump() const override
-    {
-        cout << "VarDecl { ";
-        for (auto &i : varDefList)
-        {
-            i->Dump();
-            cout << ",";
-        }
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         for (auto &i : varDefList)
         {
             i->Koopa();
         }
-        // block_end[block_now] = false;
-        // if (!is_global)
-        //     block_end[block_now] = false;
+
         return make_pair(false, -1);
     }
 };
@@ -2636,17 +2256,7 @@ public:
     int rule;
     string ident;
     unique_ptr<BaseAST> initval;
-    void Dump() const override
-    {
-        cout << "VarDef { ";
-        cout << ident;
-        if (rule == 1)
-        {
-            cout << " = ";
-            initval->Dump();
-        }
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         // 全局变量koopa
@@ -2655,9 +2265,9 @@ public:
             // 初始化为0
             if (rule == 0)
             {
-                Value tmp(VAR, 0, block_now);
+                Value tmp(VAR, 0, block_handler.block_now.index);
 
-                string name = ident + "_" + to_string(block_now);
+                string name = ident + "_" + to_string(block_handler.block_now.index);
 
                 symbol_list.addSymbol(ident, tmp);
 
@@ -2667,9 +2277,9 @@ public:
             {
                 int var_init = initval->calc();
 
-                Value tmp(VAR, var_init, block_now);
+                Value tmp(VAR, var_init, block_handler.block_now.index);
 
-                string name = ident + "_" + to_string(block_now);
+                string name = ident + "_" + to_string(block_handler.block_now.index);
 
                 symbol_list.addSymbol(ident, tmp);
 
@@ -2683,9 +2293,9 @@ public:
             if (rule == 0)
             {
                 // var_type[ident] = VAR;
-                Value tmp(VAR, 0, block_now);
+                Value tmp(VAR, 0, block_handler.block_now.index);
 
-                string name = ident + "_" + to_string(block_now);
+                string name = ident + "_" + to_string(block_handler.block_now.index);
 
                 symbol_list.addSymbol(ident, tmp);
 
@@ -2697,20 +2307,20 @@ public:
                 // var_val[ident] = initval->cal_value();
                 // int val = (initval->Koopa()).second;
 
-                string name = ident + "_" + to_string(block_now);
+                string name = ident + "_" + to_string(block_handler.block_now.index);
 
                 koopa_str += "  @" + name + " = alloc i32 " + "\n";
                 pair<bool, int> res = initval->Koopa();
                 if (res.first)
                 {
                     koopa_str += "  store " + to_string(res.second) + ", @" + name + "\n";
-                    Value tmp(VAR, res.second, block_now);
+                    Value tmp(VAR, res.second, block_handler.block_now.index);
                     symbol_list.addSymbol(ident, tmp);
                 }
                 else
                 {
                     koopa_str += "  store %" + to_string(reg_cnt - 1) + ", @" + name + "\n";
-                    Value tmp(VAR, 0, block_now);
+                    Value tmp(VAR, 0, block_handler.block_now.index);
                     symbol_list.addSymbol(ident, tmp);
                 }
             }
@@ -2730,9 +2340,7 @@ public:
     string ident;
     unique_ptr<BaseAST> init_val;
     vector<unique_ptr<BaseAST>> array_size_list;
-    void Dump() const override
-    {
-    }
+
     pair<bool, int> Koopa() const override
     {
         vector<int> len;
@@ -2742,7 +2350,7 @@ public:
         }
 
         int array_size = array_size_list.size();
-        Value var_array = Value(ARRAY, array_size, block_now);
+        Value var_array = Value(ARRAY, array_size, block_handler.block_now.index);
         // 数组放入符号表
         symbol_list.addSymbol(ident, var_array);
 
@@ -2761,7 +2369,7 @@ public:
         }
 
         // name tag
-        string name_tag = "@" + ident + "_" + to_string(block_now);
+        string name_tag = "@" + ident + "_" + to_string(block_handler.block_now.index);
 
         // type tag
         string type_tag = "i32";
@@ -2776,10 +2384,16 @@ public:
             if (init_val != nullptr) // 全局变量 有初值
             {
                 dynamic_cast<InitValWithListAST *>(init_val.get())->getInitVal(init, len);
+                string init_str = getInitList(init, len);
+                koopa_str += "global " + name_tag + " = alloc ";
+                koopa_str += type_tag + ", " + init_str + "\n";
             }
-            string init_str = getInitList(init, len);
-            koopa_str += "global " + name_tag + " = alloc ";
-            koopa_str += type_tag + ", " + init_str + "\n";
+            else
+            {
+                string init_str = getInitList(init, len);
+                koopa_str += "global " + name_tag + " = alloc ";
+                koopa_str += type_tag + ", zeroinit" + "\n";
+            }
         }
         else
         {
@@ -2803,12 +2417,7 @@ class InitValAST : public BaseAST
 {
 public:
     unique_ptr<BaseAST> exp;
-    void Dump() const override
-    {
-        cout << "InitVal { ";
-        exp->Dump();
-        cout << " }";
-    }
+
     pair<bool, int> Koopa() const override
     {
         return exp->Koopa();

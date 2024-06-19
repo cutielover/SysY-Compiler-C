@@ -592,7 +592,7 @@ void Visit(const koopa_raw_global_alloc_t &global, const koopa_raw_value_t &valu
     cout << value->name + 1 << ":\n";
     if (global.init->kind.tag == KOOPA_RVT_ZERO_INIT)
     {
-        cout << "  .zero 4\n";
+        cout << "  .zero " << cal_type_size(value->ty->data.pointer.base) << "\n";
     }
     else if (global.init->kind.tag == KOOPA_RVT_INTEGER)
     {
