@@ -7,7 +7,7 @@
 #include <deque>
 #include <unordered_map>
 #include "assert.h"
-#include "symbol.h"
+#include "utils.h"
 using namespace std;
 
 extern string koopa_str;
@@ -16,7 +16,6 @@ extern int if_cnt;
 
 // 警惕使用全局变量
 static int logical;
-
 // lv7 while
 static int loop_cnt;
 static int loop_dep;
@@ -511,7 +510,7 @@ public:
                 }
             }
             else
-            { //?
+            {
                 koopa_str += "  ret\n";
             }
 
@@ -1495,7 +1494,6 @@ public:
             string end_tag = "%is_zero_" + to_string(now_logic);
             string res_tag = "@result_" + to_string(now_logic);
 
-            // 规避错误：Instruction does not dominate all uses!
             koopa_str += "  " + res_tag + " = alloc i32\n";
             koopa_str += "  store 0, " + res_tag + "\n";
 
@@ -1510,8 +1508,7 @@ public:
                 {
                     return make_pair(true, 0);
                 }
-                // 如果不是0的话，直接忽略掉就好了？
-                // 可以
+                // 如果不是0的话，直接忽略
                 koopa_str += "  jump " + then_tag + "\n\n";
             }
             else

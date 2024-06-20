@@ -7,7 +7,7 @@
 #include <unordered_set>
 
 #include "AST.h"
-#include "symbol.h"
+#include "utils.h"
 #include "riscv.h"
 
 using namespace std;
